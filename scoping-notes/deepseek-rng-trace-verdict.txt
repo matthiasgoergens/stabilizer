@@ -1,0 +1,14 @@
+After carefully stepping through `getRandomByte()` as provided, I cannot find any deviation from the claimed trace:
+
+- `_randCount` is a `static uint8_t` initialised to 0 (file:line 50).
+- The union is `static` and zero‑initialised; `sizeof(int)` is 4, so `_rands` is a 4‑byte array (lines 52‑55).
+- The refill condition is `_randCount == sizeof(int)` (line 56). Because the reset inside the block sets `_randCount = sizeof(int);` (line 58), after refill the counter remains 4.
+- Calls 1–4 (count 0,1,2,3) bypass the condition and return `_rands[0]`…`_rands[3]` (all zero), incrementing to 4.
+- Call 5 (count == 4) triggers refill, writes the RNG output into `_bigRand`, sets count back to 4, reads `_rands[4]` (out‑of‑bounds), then increments to 5 (lines 56‑59, 61‑62).
+- Subsequent calls with count 5…255 skip the condition, return `_rands[5]`…`_rands[255]` (all OOB), and increment each time; at count 255 the increment wraps to 0 (well‑defined for `uint8_t`).
+- Counts 0‑3 then return the four bytes of the random int generated ~252 calls earlier (still in `_bigRand`/`_rands`), and at count 4 the cycle repeats exactly.
+- Static linkage per translation unit gives each TU its own independent state with the same sequence, so the 256‑call period holds within a TU.
+
+The arithmetic is correct: 4 (valid) + 252 (OOB) = 256, `uint8_t` overflow wraps, and no code path alters `_randCount` outside the described increment and the `sizeof(int)` assignment. The out‑of‑bounds reads are undefined behaviour, but the trace’s offset and counter logic is unaffected by that aspect and follows strictly from the shown source.
+
+VERDICT: CONFIRMED — stepping the code exactly reproduces the claimed period, offset sequence, and byte counts.

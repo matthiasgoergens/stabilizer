@@ -1,0 +1,27 @@
+The patch correctly eliminates the deterministic out-of-bounds read, but it leaves two significant defects unaddressed. The fix is therefore incomplete for any context where randomness quality or signal safety matter.
+
+### Finding 1 — Deterministic first‑use output (randomness defect)
+
+**File:** `runtime/Util.h`, lines 44‑49 (refill condition) and 51‑53 (byte extraction).  
+**Failure scenario:** The very first four calls to `getRandomByte()` within a translation unit always return `0x00`, `0x00`, `0x00`, `0x00`, regardless of the RNG state.
+- `_randCount` starts at `0`.  
+- The refill branch only triggers when `_randCount == sizeof(int)` (i.e., 4).  
+- For calls 1‑4, `_randCount` is 0,1,2,3 → no refill, and `_rands` is a static zero‑initialised union → read returns zero bytes.  
+- Only after the fourth call does `_randCount` become 4, triggering the first actual random draw.  
+
+**Impact:** Any code path that consumes ≤ 4 bytes (e.g., a short‑lived initialisation or a signal handler that fires early) receives no entropy. The commit message does not mention this, yet it is a real, exploitable randomness‑quality defect introduced by the same design that caused the OOB.
+
+---
+
+### Finding 2 — Unsynchronised access from signal handlers (concurrency hazard)
+
+**File:** `runtime/Util.h`, lines 43‑47 (static locals) and 48‑53 (non‑atomic updates).  
+**Failure scenario:** `getRandomByte()` is called both from normal code and from a signal handler (the commit description confirms it runs inside `onTimer`). A signal arrival during execution of the function can corrupt `_randCount` or the RNG state.
+- **Example:** Normal code reads `_randCount` (to check the refill condition), then a signal handler increments it. After resumption, the normal code uses the stale value and then performs its own increment, causing a lost update. This can lead to missed refills, repeated bytes, or, if the increment is not atomic on the target platform, a torn write that pushes `_randCount` out of the 0‑3 window without triggering the refill — effectively a concurrency‑induced OOB read similar to the original bug.
+- There is no locking, masking of signals, or atomic operations. The function is fully non‑reentrant.
+
+**Impact:** In any build where signal‑handler timing matters, the OOB safety allegedly fixed by the patch can be reintroduced nondeterministically. The fix does not address this signal‑safety problem, leaving a latent reliability bug.
+
+---
+
+**Conclusion:** The change resolves the walking‑off‑the‑buffer crash in a single‑threaded, zero‑signal‑interleaving execution, but it fails to make `getRandomByte()` correct for its documented usage environment (signal handlers, need for random output from the first call). Both defects persist post‑fix.

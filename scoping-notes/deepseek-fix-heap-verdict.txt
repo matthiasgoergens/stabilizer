@@ -1,0 +1,27 @@
+**Finding 1: Compilation failure – non-static member call without an object**
+
+**File:** `runtime/Heap.h`, in `ShuffleFreeGuard::free()`  
+**Line:** `UnshuffledHeap::free(ptr);`
+
+The fix calls `UnshuffledHeap::free(ptr)` as if `free` were a static member function. Both `ShuffledHeap` (which is `ShuffleHeap<..., KingsleyHeap<...>>`) and `UnshuffledHeap` (which is `KingsleyHeap<DataSource, DataSource>`) define `free` as a **non‑static** member function. Calling `UnshuffledHeap::free(ptr)` without an object is ill‑formed and will be rejected by any conforming C++ compiler. The `ShuffledHeap::free(ptr)` call in the `else` branch is legal because it calls the base class’s member on `*this`, but `UnshuffledHeap` is not a base, so no implicit object exists. The patch therefore **cannot compile** and cannot fix the reported crash.
+
+**Concrete failure scenario:**
+Attempt to build the patched `stabilizer` → compiler error (e.g., “cannot call member function ‘void KingsleyHeap<…>::free(void*)’ without object”). The binary is never produced; the original crash remains.
+
+---
+
+**Finding 2: Realloc shrink from >MaxSize to ≤MaxSize can mis‑route a subsequent free**
+
+**File:** `runtime/Heap.h` (absence of `realloc` override in `ShuffleFreeGuard`)  
+`ShuffleFreeGuard` only overrides `free`. It inherits `realloc` from `ShuffledHeap`/`KingsleyHeap`. The guard’s `free` uses `getSize(ptr) > MaxSize` to decide which heap to free to. This is safe as long as an object’s lifetime size never changes across the `MaxSize` boundary. However, certain `realloc` implementations may **shrink a block in‑place** while updating the size metadata, without moving the pointer. If this occurs on an object that was originally allocated with `sz > MaxSize` (bypass shuffle) and then shrunk to `sz ≤ MaxSize`, the metadata will report a size ≤ MaxSize. A later `free` on that pointer will take the `ShuffledHeap::free` path, which will:
+
+1. Swap the pointer into a shuffle‑buffer slot that was never filled (the buffer contains uninitialised memory).
+2. Pass the garbage pointer from the buffer to `KingsleyHeap::free`, leading to a crash or silent corruption.
+
+**Concrete failure scenario (when the compilation issue is worked around):**
+- `p = malloc(512)` → bypasses shuffle; `getSize(p) == 512`.
+- `realloc(p, 128)` is implemented by `KingsleyHeap` (or an underlying `mmap`‑based backend) as an in‑place shrink that updates the block’s size class to 128.
+- `free(p)` now sees `getSize(p) == 128 ≤ 256`, so `ShuffleFreeGuard` calls `ShuffledHeap::free`.
+- Inside `ShuffleHeap::free`, the buffer for class size 128 is swapped—its slot may hold an arbitrary pointer—and the arbitrary pointer is passed to `KingsleyHeap::free`, causing a crash or heap corruption.
+
+While many size‑class allocators do not shrink in‑place across size classes, the fix does not guard against this possibility and relies on an unverified property of the underlying heap. This makes the fix fragile and an incomplete restoration of malloc/free symmetry.

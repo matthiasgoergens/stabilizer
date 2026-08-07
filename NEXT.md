@@ -67,9 +67,19 @@ local commits only; pushing needs Matthias's approval.**
 ## Unverified beliefs (do not quote as fact)
 
 - The 256-byte-window characterisation of getRandomByte's steady state
-  (uint8_t wrap → 4 random + 252 .bss bytes/cycle) is a source-read
-  derivation; confirm with a ~10-line harness before external use.
-  (The reset-to-4 bug itself IS verified: gdb + fix + 170-epoch runs.)
+  (uint8_t wrap → 4 random + 252 .bss bytes/cycle): source-read
+  derivation, independently re-derived by DeepSeek stepping the code
+  (deepseek-rng-trace-verdict.txt, CONFIRMED) — but derived twice,
+  measured never; the ~10-line harness is still required before
+  external use. (The reset-to-4 bug itself IS verified: gdb + fix +
+  170-epoch runs.)
+- Cross-model review of both fixes done and adjudicated
+  (scoping-notes/deepseek-fix-review-adjudication.md): heap-fix findings
+  both refuted by reading the code; stack-fix review surfaced a real
+  residual — getRandomByte returns four 0x00 bytes before its first
+  refill (also true in the 2013 original). Open micro-fix: initialise
+  _randCount = sizeof(int). Signal-reentrancy note folded into the
+  threads work item.
 - Dead2's README claim that SZ_HEAP/SZ_LINK "work" on LLVM 12 was never
   build-verified; treat with the same scepticism parsa's claim earned.
 - Pilot anomalies unexplained: PADDED within-seed CV (~1.5%) > SINGLE CV
