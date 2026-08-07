@@ -1,0 +1,100 @@
+6c081b19	2023-05-14T19:36:06Z	Cmake is now making clang/clang++ symlinks in the build dir, but install them to the doc dir.
+8231ab04	2023-05-14T15:39:30Z	Improve detection of clang/clang++ and other executables.
+50be16b5	2023-03-13T16:54:28Z	remove paths relative to `STABILIZER_HOME`
+c88ab745	2023-05-13T14:20:49Z	- Move cmake helpers to separate folder
+bb4b0cbb	2023-03-16T19:33:01Z	add docker support
+b384bf35	2023-03-10T18:00:50Z	port project to cmake
+a117a578	2023-03-07T11:59:42Z	fix llvm-12 compilation error
+d1f5648e	2023-02-13T05:20:09Z	renamed LLVMStabilizer.so to libLLVMStabilizer.so
+94184faa	2023-02-21T07:25:39Z	fixed TLS
+b1ec617e	2023-02-06T07:54:48Z	replaced depticated `distutils`
+ca8d6ed8	2023-02-05T12:01:19Z	Remove SZ_LOWER setting, code lowering is now auto-enabled by the SZ_CODE again.
+695e90d2	2023-02-05T12:16:38Z	Add temp file cleanup
+4f6ea002	2022-11-30T13:25:26Z	fixed the code generation for the exception handling
+bf0b3db2	2022-11-25T06:37:14Z	fixed 'Object file missing, ignoring: None' warning
+c95ea141	2022-11-24T09:14:11Z	added support for llvm 14
+9ed58652	2022-11-24T09:12:05Z	fixed crashes caused by incorrect placement of a dummy
+13557578	2022-11-24T09:05:40Z	fixed crashes caused by accessing TLS variables via relocation table
+115c2f78	2022-10-08T06:44:31Z	fix an 'f' missing in szcc
+10dc76c4	2021-09-29T11:55:37Z	Create LICENSE
+5f955cdd	2022-09-15T20:09:46Z	Only capture SIGABRT in release builds, otherwise allowing debugging.
+cedcfe81	2022-09-15T20:07:04Z	Add -Os to cflags
+cc2acf76	2022-09-15T19:56:28Z	Split SZ_LOWER out of SZ_CODE, allows using the SZ_LOWER modifications without SZ_CODE to avoid the SZ_CODE-related crashes.
+a13f046d	2022-09-14T17:53:28Z	Add rewritten szcc compiler wrapper.
+92b46b91	2022-09-14T17:44:29Z	Remove SPEC CPU2006 related files.
+e02d2f87	2021-07-07T09:52:55Z	remove setup files
+5f9a8369	2021-07-07T09:44:49Z	update readme
+158b612f	2021-07-07T08:51:40Z	build tests without `-Rlink` flag
+998d6c09	2021-07-01T09:35:11Z	fix trailing whitespaces and new lines
+d85009e8	2021-06-29T21:39:42Z	remove irrelevant files
+ea6aa8d7	2021-07-05T16:14:53Z	fix code randomization
+3e7b3d8d	2021-06-29T21:27:02Z	port to llvm 12
+c49f0d3a	2021-07-01T21:17:04Z	stop timer alarm before exit
+8856b63e	2021-06-30T23:01:22Z	allow clang++ and -rdynamic
+a7cc7cda	2021-06-30T21:11:12Z	szc fix
+0ffaceb2	2021-06-30T20:36:24Z	split setup.sh
+b80beb0a	2021-06-30T20:27:08Z	szc handles more clang args. szc -fopt=2 uses -O2 also on frontend. setup.sh adds szc to PATH. Python3 fixes.
+2076be08	2021-06-29T21:56:42Z	run.py allows other config combinations. Set PATH and LD_LIBRARY_PATH.
+c04cb073	2021-06-29T18:04:19Z	get clang 10.0.0 from CVMFS LCG_99. Python3 fixes. make clean also cleans tests.
+f820e667	2021-06-29T17:36:29Z	update to LLVM 10.0.0
+1eefcb21	2021-06-29T02:31:48Z	szc fix. -Rlink works too.
+8395ffdf	2021-06-29T01:34:33Z	tidy
+94e91713	2021-06-29T01:26:26Z	README.md git commands
+93226f8f	2021-06-29T01:23:16Z	Mostly working for Clang 9.0.1. All tests run without -Rcode. Fix warnings in tests. setup.sh to use Clang from LCG CVMFS.
+3ec7e6a3	2020-10-26T19:42:16Z	roll back some changes in includes
+c7a0967d	2020-10-26T00:07:05Z	fix .gitmodules
+8faa4f6a	2020-05-14T20:39:35Z	Refactor submodule
+44a9e157	2020-05-14T20:30:28Z	Add to readme
+96b3ca98	2020-05-14T20:29:10Z	Add submodules for build dependencies
+e6c0b414	2020-05-14T20:23:56Z	Add submodules
+79c4a8eb	2019-09-18T20:42:25Z	Update README.md
+7414114c	2019-09-18T20:39:05Z	Updated Stabilizer to LLVM 9.0
+0ef81f2f	2018-11-21T12:49:48Z	Merge branch 'master' of https://github.com/fusiled/stabilizer
+c0976f83	2018-11-21T12:49:19Z	pass: removed debug couts
+e4266666	2018-11-21T12:47:23Z	Update README.md
+aca3c0bb	2018-11-21T12:43:26Z	szc: Switched default compiler to clang
+845a6b3e	2018-11-21T12:42:35Z	pass: Now compilation should work for llvm6.0
+bc6ad198	2016-08-04T15:14:37Z	Fork of heaplayers is no longer necessary.
+96079b2c	2013-05-21T02:05:24Z	Whoops.
+da1f5e32	2013-05-21T02:00:57Z	Missed merge conflict
+9deb19f7	2013-05-21T01:58:14Z	Resolved merge conflict in runtime/Function.h and runtime/Function.cpp
+67e7be31	2013-05-21T01:53:38Z	Merged changes to runtime/Context.h
+618637c2	2013-05-21T01:47:14Z	Changed stack randomization to use a single random pad for the entire period. Pad size is re-randomized at function re-randomization time.
+4288d1a6	2013-05-21T01:47:03Z	Small changes for PowerPC
+b7294666	2013-05-21T01:45:21Z	Cleanup and small fixes.
+8f69f1c5	2013-03-22T15:01:12Z	Updated results processing script.  Committing code alignment used in paper eval.
+2f5ef57e	2013-02-06T18:18:50Z	Not a pointer.
+578bba03	2013-02-05T06:01:57Z	Tabs to spaces
+d00cbf5a	2013-02-05T05:53:34Z	more tweaks
+f026a9a2	2013-02-05T05:52:10Z	tweaks
+2a55784d	2013-02-05T05:00:31Z	Small formatting fixes, plus more text on experimental setup.
+ad8559c6	2013-02-05T04:45:02Z	Readme updates.
+8de8862b	2013-02-02T16:41:25Z	Fork of DieHard was unnecessary.
+5588ab88	2013-02-01T20:38:53Z	Much cleaner function location management, plus working panic backtraces.
+79091944	2013-01-31T18:00:07Z	More cleanup and organization.
+54b4919b	2013-01-31T15:38:57Z	Ignore the static library.
+166493e5	2013-01-30T22:06:10Z	Debug build
+de3a56aa	2013-01-30T20:17:29Z	Build a static runtime library too.
+d475edd6	2013-01-30T16:58:23Z	Lots of code cleanup and debug output. The panic function currently only scans defunct locations.
+cb46851f	2013-01-29T02:57:36Z	Small code organization tweaks.
+8165c89d	2013-01-28T23:08:34Z	Cleaning up TLSF. Should be part of Heap-Layers, not Stabilizer.
+46a92930	2013-01-25T15:44:09Z	Missing default argument for no randomization
+5da06fe3	2013-01-25T15:29:55Z	PowerPC compatibility updates.
+d05b7a18	2013-01-19T01:01:46Z	moved stack pad computation
+745648f7	2013-01-19T00:36:40Z	benchmark script fixes
+6558618c	2013-01-18T18:16:04Z	Uncommitted tweaks from linux machine.
+8474087d	2013-01-18T18:08:44Z	Scanning for PC-relative uses is no longer exptime.  Eugh.
+36fd6906	2013-01-15T23:04:18Z	Reduced overhead of stack randomization with random pad reuse.
+1e35f942	2013-01-13T16:46:06Z	Fixed the heap on Linux.  Some ubuntu-specific hacks in the compiler driver to build agains gcc-4.6 instead of 4.7.  Not sure why gfortran-4.7 doesn't work.
+8b41ff56	2013-01-11T22:03:51Z	Merge branch 'master' of github.com:ccurtsinger/stabilizer
+24e06e4d	2013-01-11T22:03:38Z	Generate random stack padding in bulk instead of discarding the high-order random bytes.
+6152a54f	2013-01-11T22:00:52Z	Small fixes for linux in the new driver.
+98bd5475	2013-01-11T21:19:10Z	Performance improvements
+27df8950	2013-01-11T20:02:20Z	Fix for landingpad
+d5e4d921	2013-01-11T05:41:27Z	Updated szc script, plus some small compatibility tweaks.
+5be3a4a5	2013-01-11T05:01:22Z	More Linux compatibility fixes.
+0f30d989	2013-01-10T17:07:00Z	Small fix for empty ctor array initializers
+17ca49ef	2013-01-09T18:50:07Z	Updated readme
+3809561e	2013-01-09T18:33:48Z	Removing unneeded submodules
+a13b1fb2	2013-01-09T18:29:54Z	Merging new version
+d395f1ae	2013-01-09T18:11:27Z	Working code randomization with the GC-style stack scan on re-randomization.

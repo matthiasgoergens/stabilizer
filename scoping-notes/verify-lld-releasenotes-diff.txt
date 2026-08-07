@@ -1,0 +1,13 @@
+ ----------------
+ 
+-* ``-z nosectionheader`` has been implemented to omit the section header table.
+-  The operation is similar to ``llvm-objcopy --strip-sections``.
+-  (`#101286 <https://github.com/llvm/llvm-project/pull/101286>`_)
+-* ``--randomize-section-padding=<seed>`` is introduced to insert random padding
+--
++++ b/lld/docs/ReleaseNotes.rst
+@@ -29,12 +29,45 @@ ELF Improvements
+ * ``-z nosectionheader`` has been implemented to omit the section header table.
+   The operation is similar to ``llvm-objcopy --strip-sections``.
+   (`#101286 <https://github.com/llvm/llvm-project/pull/101286>`_)
++* ``--randomize-section-padding=<seed>`` is introduced to insert random padding

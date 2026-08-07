@@ -1,0 +1,373 @@
+=== atw1020_master.json ===
+845a6b3e	2018-11-21T12:42:35Z	pass: Now compilation should work for llvm6.0
+aca3c0bb	2018-11-21T12:43:26Z	szc: Switched default compiler to clang
+e4266666	2018-11-21T12:47:23Z	Update README.md
+c0976f83	2018-11-21T12:49:19Z	pass: removed debug couts
+0ef81f2f	2018-11-21T12:49:48Z	Merge branch 'master' of https://github.com/fusiled/stabilizer
+7414114c	2019-09-18T20:39:05Z	Updated Stabilizer to LLVM 9.0
+79c4a8eb	2019-09-18T20:42:25Z	Update README.md
+e6c0b414	2020-05-14T20:23:56Z	Add submodules
+96b3ca98	2020-05-14T20:29:10Z	Add submodules for build dependencies
+44a9e157	2020-05-14T20:30:28Z	Add to readme
+8faa4f6a	2020-05-14T20:39:35Z	Refactor submodule
+682d0726	2021-06-19T06:23:51Z	set up build enviroment for apple silicon
+e4ec7607	2021-06-19T06:26:37Z	update make include
+5f0bb956	2021-06-20T23:08:26Z	Create (non-working) CMakeLists.txt and added llvm namespace to RandomNumberGenerator
+--- files (top 20) ---
+modified	.gitignore	4
+added	.gitmodules	6
+added	CMakeLists.txt	15
+added	DieHard	1
+added	Heap-Layers	1
+modified	README.md	60
+modified	common.mk	18
+modified	pass/LowerIntrinsics.cpp	8
+modified	pass/Stabilizer.cpp	88
+added	platforms/Darwin.arm64.mk	1
+modified	runtime/Heap.h	46
+modified	runtime/Jump.h	143
+modified	runtime/Util.h	47
+modified	runtime/libstabilizer.cpp	325
+modified	szc	18
+
+=== dendibakh_master.json ===
+845a6b3e	2018-11-21T12:42:35Z	pass: Now compilation should work for llvm6.0
+aca3c0bb	2018-11-21T12:43:26Z	szc: Switched default compiler to clang
+e4266666	2018-11-21T12:47:23Z	Update README.md
+c0976f83	2018-11-21T12:49:19Z	pass: removed debug couts
+0ef81f2f	2018-11-21T12:49:48Z	Merge branch 'master' of https://github.com/fusiled/stabilizer
+7414114c	2019-09-18T20:39:05Z	Updated Stabilizer to LLVM 9.0
+79c4a8eb	2019-09-18T20:42:25Z	Update README.md
+--- files (top 20) ---
+modified	README.md	2
+modified	common.mk	18
+modified	pass/LowerIntrinsics.cpp	8
+modified	pass/Stabilizer.cpp	88
+modified	runtime/libstabilizer.cpp	2
+modified	szc	18
+
+=== fusiled_master.json ===
+845a6b3e	2018-11-21T12:42:35Z	pass: Now compilation should work for llvm6.0
+aca3c0bb	2018-11-21T12:43:26Z	szc: Switched default compiler to clang
+e4266666	2018-11-21T12:47:23Z	Update README.md
+c0976f83	2018-11-21T12:49:19Z	pass: removed debug couts
+0ef81f2f	2018-11-21T12:49:48Z	Merge branch 'master' of https://github.com/fusiled/stabilizer
+--- files (top 20) ---
+modified	README.md	2
+modified	common.mk	18
+modified	pass/LowerIntrinsics.cpp	8
+modified	pass/Stabilizer.cpp	78
+modified	runtime/libstabilizer.cpp	2
+modified	szc	16
+
+=== jgall_master.json ===
+845a6b3e	2018-11-21T12:42:35Z	pass: Now compilation should work for llvm6.0
+aca3c0bb	2018-11-21T12:43:26Z	szc: Switched default compiler to clang
+e4266666	2018-11-21T12:47:23Z	Update README.md
+c0976f83	2018-11-21T12:49:19Z	pass: removed debug couts
+0ef81f2f	2018-11-21T12:49:48Z	Merge branch 'master' of https://github.com/fusiled/stabilizer
+7414114c	2019-09-18T20:39:05Z	Updated Stabilizer to LLVM 9.0
+79c4a8eb	2019-09-18T20:42:25Z	Update README.md
+e6c0b414	2020-05-14T20:23:56Z	Add submodules
+96b3ca98	2020-05-14T20:29:10Z	Add submodules for build dependencies
+44a9e157	2020-05-14T20:30:28Z	Add to readme
+8faa4f6a	2020-05-14T20:39:35Z	Refactor submodule
+--- files (top 20) ---
+modified	.gitignore	4
+added	.gitmodules	6
+added	.vscode/c_cpp_properties.json	20
+added	DieHard	1
+added	Heap-Layers	1
+modified	README.md	60
+modified	common.mk	18
+modified	pass/LowerIntrinsics.cpp	8
+modified	pass/Stabilizer.cpp	88
+modified	runtime/Heap.h	46
+modified	runtime/Jump.h	143
+modified	runtime/Util.h	47
+modified	runtime/libstabilizer.cpp	325
+modified	szc	18
+
+=== magras_fix-tls.json ===
+845a6b3e	2018-11-21T12:42:35Z	pass: Now compilation should work for llvm6.0
+aca3c0bb	2018-11-21T12:43:26Z	szc: Switched default compiler to clang
+e4266666	2018-11-21T12:47:23Z	Update README.md
+c0976f83	2018-11-21T12:49:19Z	pass: removed debug couts
+0ef81f2f	2018-11-21T12:49:48Z	Merge branch 'master' of https://github.com/fusiled/stabilizer
+7414114c	2019-09-18T20:39:05Z	Updated Stabilizer to LLVM 9.0
+79c4a8eb	2019-09-18T20:42:25Z	Update README.md
+e6c0b414	2020-05-14T20:23:56Z	Add submodules
+96b3ca98	2020-05-14T20:29:10Z	Add submodules for build dependencies
+44a9e157	2020-05-14T20:30:28Z	Add to readme
+8faa4f6a	2020-05-14T20:39:35Z	Refactor submodule
+c7a0967d	2020-10-26T00:07:05Z	fix .gitmodules
+3ec7e6a3	2020-10-26T19:42:16Z	roll back some changes in includes
+93226f8f	2021-06-29T01:23:16Z	Mostly working for Clang 9.0.1. All tests run without -Rcode. Fix warnings in tests. setup.sh to use Clang from LCG CVMFS.
+94e91713	2021-06-29T01:26:26Z	README.md git commands
+8395ffdf	2021-06-29T01:34:33Z	tidy
+1eefcb21	2021-06-29T02:31:48Z	szc fix. -Rlink works too.
+f820e667	2021-06-29T17:36:29Z	update to LLVM 10.0.0
+c04cb073	2021-06-29T18:04:19Z	get clang 10.0.0 from CVMFS LCG_99. Python3 fixes. make clean also cleans tests.
+2076be08	2021-06-29T21:56:42Z	run.py allows other config combinations. Set PATH and LD_LIBRARY_PATH.
+b80beb0a	2021-06-30T20:27:08Z	szc handles more clang args. szc -fopt=2 uses -O2 also on frontend. setup.sh adds szc to PATH. Python3 fixes.
+0ffaceb2	2021-06-30T20:36:24Z	split setup.sh
+a7cc7cda	2021-06-30T21:11:12Z	szc fix
+8856b63e	2021-06-30T23:01:22Z	allow clang++ and -rdynamic
+c49f0d3a	2021-07-01T21:17:04Z	stop timer alarm before exit
+3e7b3d8d	2021-06-29T21:27:02Z	port to llvm 12
+ea6aa8d7	2021-07-05T16:14:53Z	fix code randomization
+d85009e8	2021-06-29T21:39:42Z	remove irrelevant files
+998d6c09	2021-07-01T09:35:11Z	fix trailing whitespaces and new lines
+158b612f	2021-07-07T08:51:40Z	build tests without `-Rlink` flag
+5f9a8369	2021-07-07T09:44:49Z	update readme
+e02d2f87	2021-07-07T09:52:55Z	remove setup files
+92b46b91	2022-09-14T17:44:29Z	Remove SPEC CPU2006 related files.
+a13f046d	2022-09-14T17:53:28Z	Add rewritten szcc compiler wrapper.
+cc2acf76	2022-09-15T19:56:28Z	Split SZ_LOWER out of SZ_CODE, allows using the SZ_LOWER modifications without SZ_CODE to avoid the SZ_CODE-related crashes.
+cedcfe81	2022-09-15T20:07:04Z	Add -Os to cflags
+5f955cdd	2022-09-15T20:09:46Z	Only capture SIGABRT in release builds, otherwise allowing debugging.
+10dc76c4	2021-09-29T11:55:37Z	Create LICENSE
+115c2f78	2022-10-08T06:44:31Z	fix an 'f' missing in szcc
+da66530c	2022-11-24T09:14:11Z	added support for llvm 14
+4e154b8f	2022-11-24T09:05:40Z	fixed crashes caused by accessing TLS variables via relocation table
+d08d6ae1	2022-11-24T09:12:05Z	fixed crashes caused by incorrect placement of a dummy
+--- files (top 20) ---
+modified	.gitignore	4
+added	.gitmodules	6
+removed	.hgignore	9
+added	DieHard	1
+added	Heap-Layers	1
+added	LICENSE	201
+modified	README.md	182
+added	clang	1
+added	clang++	1
+modified	common.mk	42
+modified	pass/IntrinsicLibcalls.h	12
+modified	pass/LowerIntrinsics.cpp	24
+modified	pass/Makefile	2
+modified	pass/Stabilizer.cpp	400
+modified	platforms/Darwin.i386.mk	4
+modified	platforms/Darwin.x86_64.mk	3
+modified	platforms/Linux.i386.mk	4
+modified	platforms/Linux.ppc.mk	2
+modified	platforms/Linux.x86_64.mk	6
+removed	process.py	233
+
+=== magras_master.json ===
+845a6b3e	2018-11-21T12:42:35Z	pass: Now compilation should work for llvm6.0
+aca3c0bb	2018-11-21T12:43:26Z	szc: Switched default compiler to clang
+e4266666	2018-11-21T12:47:23Z	Update README.md
+c0976f83	2018-11-21T12:49:19Z	pass: removed debug couts
+0ef81f2f	2018-11-21T12:49:48Z	Merge branch 'master' of https://github.com/fusiled/stabilizer
+7414114c	2019-09-18T20:39:05Z	Updated Stabilizer to LLVM 9.0
+79c4a8eb	2019-09-18T20:42:25Z	Update README.md
+e6c0b414	2020-05-14T20:23:56Z	Add submodules
+96b3ca98	2020-05-14T20:29:10Z	Add submodules for build dependencies
+44a9e157	2020-05-14T20:30:28Z	Add to readme
+8faa4f6a	2020-05-14T20:39:35Z	Refactor submodule
+c7a0967d	2020-10-26T00:07:05Z	fix .gitmodules
+3ec7e6a3	2020-10-26T19:42:16Z	roll back some changes in includes
+93226f8f	2021-06-29T01:23:16Z	Mostly working for Clang 9.0.1. All tests run without -Rcode. Fix warnings in tests. setup.sh to use Clang from LCG CVMFS.
+94e91713	2021-06-29T01:26:26Z	README.md git commands
+8395ffdf	2021-06-29T01:34:33Z	tidy
+1eefcb21	2021-06-29T02:31:48Z	szc fix. -Rlink works too.
+f820e667	2021-06-29T17:36:29Z	update to LLVM 10.0.0
+c04cb073	2021-06-29T18:04:19Z	get clang 10.0.0 from CVMFS LCG_99. Python3 fixes. make clean also cleans tests.
+2076be08	2021-06-29T21:56:42Z	run.py allows other config combinations. Set PATH and LD_LIBRARY_PATH.
+b80beb0a	2021-06-30T20:27:08Z	szc handles more clang args. szc -fopt=2 uses -O2 also on frontend. setup.sh adds szc to PATH. Python3 fixes.
+0ffaceb2	2021-06-30T20:36:24Z	split setup.sh
+a7cc7cda	2021-06-30T21:11:12Z	szc fix
+8856b63e	2021-06-30T23:01:22Z	allow clang++ and -rdynamic
+c49f0d3a	2021-07-01T21:17:04Z	stop timer alarm before exit
+3e7b3d8d	2021-06-29T21:27:02Z	port to llvm 12
+ea6aa8d7	2021-07-05T16:14:53Z	fix code randomization
+d85009e8	2021-06-29T21:39:42Z	remove irrelevant files
+998d6c09	2021-07-01T09:35:11Z	fix trailing whitespaces and new lines
+158b612f	2021-07-07T08:51:40Z	build tests without `-Rlink` flag
+5f9a8369	2021-07-07T09:44:49Z	update readme
+e02d2f87	2021-07-07T09:52:55Z	remove setup files
+92b46b91	2022-09-14T17:44:29Z	Remove SPEC CPU2006 related files.
+a13f046d	2022-09-14T17:53:28Z	Add rewritten szcc compiler wrapper.
+cc2acf76	2022-09-15T19:56:28Z	Split SZ_LOWER out of SZ_CODE, allows using the SZ_LOWER modifications without SZ_CODE to avoid the SZ_CODE-related crashes.
+cedcfe81	2022-09-15T20:07:04Z	Add -Os to cflags
+5f955cdd	2022-09-15T20:09:46Z	Only capture SIGABRT in release builds, otherwise allowing debugging.
+10dc76c4	2021-09-29T11:55:37Z	Create LICENSE
+115c2f78	2022-10-08T06:44:31Z	fix an 'f' missing in szcc
+--- files (top 20) ---
+modified	.gitignore	4
+added	.gitmodules	6
+removed	.hgignore	9
+added	DieHard	1
+added	Heap-Layers	1
+added	LICENSE	201
+modified	README.md	182
+added	clang	1
+added	clang++	1
+modified	common.mk	42
+modified	pass/IntrinsicLibcalls.h	12
+modified	pass/LowerIntrinsics.cpp	24
+modified	pass/Makefile	2
+modified	pass/Stabilizer.cpp	395
+modified	platforms/Darwin.i386.mk	4
+modified	platforms/Darwin.x86_64.mk	3
+modified	platforms/Linux.i386.mk	4
+modified	platforms/Linux.ppc.mk	2
+modified	platforms/Linux.x86_64.mk	6
+removed	process.py	233
+
+=== nickhutchinson_master.json ===
+419916fb	2015-08-30T09:21:20Z	Add support for LLVM 3.6
+--- files (top 20) ---
+modified	README.md	6
+modified	pass/LowerIntrinsics.cpp	8
+modified	pass/Stabilizer.cpp	16
+
+=== parsa_master.json ===
+1ba581b1	2023-04-09T04:22:06Z	managed to compile with llvm 16.0.1
+2fcb91c1	2023-04-09T23:53:40Z	attempt to fix the ilist use mistake
+fedc5f25	2023-04-11T18:37:47Z	add new pass manager support to LowerIntrinsics
+3075d239	2023-04-11T18:42:28Z	fix mistake in use of Function::create
+ff012289	2023-04-11T21:34:09Z	transition to the new pass manager
+e8cc696c	2023-04-11T22:01:01Z	modernize szc
+371d13fa	2023-04-12T00:00:57Z	minor cleanup; still broken
+f9962098	2023-04-12T01:02:19Z	3.16's NULLs mean nothing anymore, still broken
+00091ac5	2023-04-12T03:17:54Z	was using `ConstantExpr::getGetElementPtr` wrong
+1bf1e9de	2023-04-12T11:41:21Z	Suppress unused value warning
+e77b8bf3	2023-04-12T11:41:46Z	Attempt to fix declareRuntimeFunctions
+44acea53	2023-04-12T22:57:51Z	More readability cleanups
+74fa6827	2023-04-13T00:55:22Z	Attempt to update makeConstructor
+aefe69ae	2023-04-13T01:10:58Z	Change incompatible NULLs to 0
+535ba4d7	2023-04-13T01:11:30Z	Add libmath to szc library list
+a806c2bf	2023-04-13T02:46:46Z	Updated intrinsics table, may need a better fix
+6f6fa674	2026-02-13T22:24:13Z	patch PC-relative refs
+65966713	2026-02-13T23:00:14Z	restore heap shuffle
+a5abd4e1	2026-02-13T23:07:28Z	GetLibcall cleanups
+dce75acd	2026-02-13T23:38:40Z	broader x86_64 relocation coverage
+27536905	2026-02-14T00:41:38Z	support flang, tighten instrinsic rewrites
+55380af5	2026-02-14T04:45:41Z	near map PIE for RIP-relative refs (no more -no-pie requirement)
+30694c1c	2026-02-14T13:26:13Z	remove dead always_inlined/InitLibcalls/isAlwaysInlined plumbing
+8f89ee31	2026-02-14T15:06:37Z	rid of using ns std
+03720f3b	2026-02-14T20:42:35Z	tighten reloc checking if linux
+2bffc191	2026-02-14T21:25:16Z	leave more intrinsics for LLVM to lower itself
+--- files (top 20) ---
+modified	.gitignore	4
+modified	README.md	19
+modified	pass/IntrinsicLibcalls.h	183
+modified	pass/LowerIntrinsics.cpp	102
+modified	pass/Stabilizer.cpp	692
+added	runtime/CodeWindow.cpp	25
+added	runtime/CodeWindow.h	14
+modified	runtime/Function.cpp	114
+modified	runtime/Function.h	16
+modified	runtime/FunctionLocation.h	18
+modified	runtime/Heap.h	10
+modified	runtime/Intrinsics.cpp	54
+modified	runtime/MMapSource.h	97
+added	runtime/TextRelocations.cpp	275
+added	runtime/TextRelocations.h	26
+modified	runtime/libstabilizer.cpp	139
+modified	szc	232
+modified	szclo.cfg	2
+modified	tests/Context/hello.cpp	2
+modified	tests/bzip2/bzip2.c	4
+
+=== parsa_upgrade_llvm_19.json ===
+45318981	2025-12-06T00:10:16Z	Upgrade Stabilizer pass/runtime for LLVM 19
+--- files (top 20) ---
+modified	.gitignore	20
+modified	common.mk	6
+modified	pass/IntrinsicLibcalls.h	201
+modified	pass/LowerIntrinsics.cpp	81
+added	pass/LowerIntrinsics.h	8
+modified	pass/Makefile	3
+modified	pass/Stabilizer.cpp	649
+modified	runtime/Context.h	10
+modified	runtime/Function.cpp	158
+modified	runtime/Function.h	59
+modified	runtime/FunctionLocation.h	22
+modified	runtime/Heap.h	2
+modified	runtime/Intrinsics.cpp	18
+modified	runtime/MemRange.h	2
+modified	runtime/Util.h	6
+modified	runtime/libstabilizer.cpp	255
+modified	szc	87
+modified	szclo.cfg	2
+removed	tests/Context/Makefile	8
+modified	tests/Makefile	2
+
+=== plasma-umass_master.json ===
+030cc946	2014-09-19T16:32:43Z	Merge pull request #1 from ccurtsinger/master
+--- files (top 20) ---
+
+=== schrummy14_master.json ===
+d1a21a19	2019-09-23T03:55:31Z	Updated README.md. There needs to be an updated guide on how to install LLVM 3.1
+--- files (top 20) ---
+modified	README.md	2
+
+=== thinkmoore_master.json ===
+6aaa2bbd	2016-01-22T02:49:42Z	Add environmental variable to disable rerandomization
+30719906	2016-01-22T03:30:58Z	Add run and config options for no randomization
+df308812	2016-01-22T06:12:38Z	Add support to process.py for norandom configurations
+--- files (top 20) ---
+modified	process.py	4
+modified	run.py	20
+modified	runtime/libstabilizer.cpp	6
+modified	szchi.cfg	8
+modified	szclo.cfg	8
+
+=== timadye_master.json ===
+845a6b3e	2018-11-21T12:42:35Z	pass: Now compilation should work for llvm6.0
+aca3c0bb	2018-11-21T12:43:26Z	szc: Switched default compiler to clang
+e4266666	2018-11-21T12:47:23Z	Update README.md
+c0976f83	2018-11-21T12:49:19Z	pass: removed debug couts
+0ef81f2f	2018-11-21T12:49:48Z	Merge branch 'master' of https://github.com/fusiled/stabilizer
+7414114c	2019-09-18T20:39:05Z	Updated Stabilizer to LLVM 9.0
+79c4a8eb	2019-09-18T20:42:25Z	Update README.md
+e6c0b414	2020-05-14T20:23:56Z	Add submodules
+96b3ca98	2020-05-14T20:29:10Z	Add submodules for build dependencies
+44a9e157	2020-05-14T20:30:28Z	Add to readme
+8faa4f6a	2020-05-14T20:39:35Z	Refactor submodule
+c7a0967d	2020-10-26T00:07:05Z	fix .gitmodules
+3ec7e6a3	2020-10-26T19:42:16Z	roll back some changes in includes
+93226f8f	2021-06-29T01:23:16Z	Mostly working for Clang 9.0.1. All tests run without -Rcode. Fix warnings in tests. setup.sh to use Clang from LCG CVMFS.
+94e91713	2021-06-29T01:26:26Z	README.md git commands
+8395ffdf	2021-06-29T01:34:33Z	tidy
+1eefcb21	2021-06-29T02:31:48Z	szc fix. -Rlink works too.
+f820e667	2021-06-29T17:36:29Z	update to LLVM 10.0.0
+c04cb073	2021-06-29T18:04:19Z	get clang 10.0.0 from CVMFS LCG_99. Python3 fixes. make clean also cleans tests.
+2076be08	2021-06-29T21:56:42Z	run.py allows other config combinations. Set PATH and LD_LIBRARY_PATH.
+b80beb0a	2021-06-30T20:27:08Z	szc handles more clang args. szc -fopt=2 uses -O2 also on frontend. setup.sh adds szc to PATH. Python3 fixes.
+0ffaceb2	2021-06-30T20:36:24Z	split setup.sh
+a7cc7cda	2021-06-30T21:11:12Z	szc fix
+8856b63e	2021-06-30T23:01:22Z	allow clang++ and -rdynamic
+c49f0d3a	2021-07-01T21:17:04Z	stop timer alarm before exit
+--- files (top 20) ---
+modified	.gitignore	4
+added	.gitmodules	6
+added	.vscode/c_cpp_properties.json	20
+added	DieHard	1
+added	Heap-Layers	1
+modified	README.md	63
+modified	common.mk	41
+modified	pass/LowerIntrinsics.cpp	8
+modified	pass/Stabilizer.cpp	90
+modified	process.py	12
+modified	run.py	11
+modified	runtime/Heap.h	41
+modified	runtime/Jump.h	143
+modified	runtime/Util.h	45
+modified	runtime/libstabilizer.cpp	325
+added	setup-base.sh	6
+added	setup.sh	3
+modified	szc	65
+modified	tests/HelloWorld/Makefile	2
+modified	tests/Makefile	2
+
+=== tristan-potter_master.json ===
+030cc946	2014-09-19T16:32:43Z	Merge pull request #1 from ccurtsinger/master
+--- files (top 20) ---
+
+=== yqzhang_master.json ===
+030cc946	2014-09-19T16:32:43Z	Merge pull request #1 from ccurtsinger/master
+--- files (top 20) ---
+

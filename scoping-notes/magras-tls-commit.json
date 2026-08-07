@@ -1,0 +1,1 @@
+{"files":[{"additions":1,"deletions":1,"filename":"pass/Stabilizer.cpp"}],"message":"fixed crashes caused by accessing TLS variables via relocation table","sha":"4e154b8fe64e4d4da3f8c5af018f6be8a79dccfe","stats":{"additions":1,"deletions":1,"total":2}}
