@@ -5,11 +5,12 @@ review (in-family refutation agent) found the first draft overclaimed its
 two load-bearing inferences, and this version corrects them. The first
 verification experiment it demanded has since landed and passed (original
 survives ~173 re-randomisation epochs on a real benchmark, all modes, §2);
-the second (parsa rebuilt with 2013-pinned Heap-Layers) is running. A
-cross-model pass (DeepSeek, reasoning model) returned CONFIRMED against
-this revision (`scoping-notes/deepseek-verdict.txt`); a codex pass is
-queued behind quota as a second family. The recommendation remains
-conditional on the task-4 baseline either way.
+the second resolved the Heap-Layers confound and yielded the first fix —
+the `-Rheap` crash is root-caused and repaired (§1). A cross-model pass
+(DeepSeek, reasoning model) returned CONFIRMED against this revision
+(`scoping-notes/deepseek-verdict.txt`); a codex pass is queued behind
+quota as a second family. The recommendation remains conditional on the
+task-4 baseline either way.
 
 Evidence base: `scoping-notes/` in this repo — `runtime-analysis.md` (source
 read of the runtime and pass), `fork-survey.md` (51 repos, all 163 branches
@@ -111,18 +112,25 @@ cluster), all 163 branches compared, diffs read for everything ahead.
   fault) — before any timer fires; `-Rcode` deterministically on the 2nd
   re-randomisation epoch in `FunctionLocation::sweep()`; `-Rstack` on the
   1st epoch in the stack-pad refresh (crash site logged, not root-caused).
-  Precision about what this does and does not establish: these are **crash
-  sites, not diagnosed defects**; three is a **lower bound** from one
-  single-threaded C benchmark at one input (a fourth known bug class — TLS
-  access via the relocation table, fixed in the magras lineage — is absent
-  from parsa's ancestry and untriggered by libquantum); and one confound
-  is unexcluded — the verification built against **unpinned 2026-HEAD
-  Heap-Layers and DieHard** while the working original pinned 2013
-  commits, and the `-Rheap` crash bottoms out inside Heap-Layers templates
-  (a pinned rebuild is running as a diagnostic). The wrappers themselves
-  (`stabilizer_realloc`/`stabilizer_free`) are byte-identical to
-  upstream's — verified by direct diff — so the defect is in the port's
-  other changes, its dependencies, or a latent original bug newly exposed.
+  Precision about what this does and does not establish: these were
+  **crash sites, not diagnosed defects** when found; the count is a
+  **lower bound** from one single-threaded C benchmark at one input (a
+  further known bug class — TLS access via the relocation table, fixed in
+  the magras lineage — is absent from parsa's ancestry and untriggered by
+  libquantum). **The `-Rheap` crash has since been root-caused and
+  fixed** (2026-08-07, `~/prog/stabilizer-parsa-fix/NOTES.md`, fix commit
+  `f9ed534` in the local clone): modern DieHard's `ShuffleHeap::malloc()`
+  bypasses its shuffle buffer for objects over `MaxSize` (256 B here) but
+  `free()` lacks the matching bypass, so freeing any larger object swaps
+  a null out of a never-filled slot — gdb-confirmed. The Heap-Layers
+  confound resolved instructively: the *unmodified* port does not even
+  compile against 2013-pinned dependencies (template-arity mismatch), so
+  parsa's heap adaptation was necessary and carried exactly one asymmetry
+  bug, now guarded. Post-fix: `-Rheap` libquantum survives ~150 epochs
+  across 4 runs with byte-identical output; the combined mode advances to
+  the known `-Rcode` epoch-2 crash; `-Rstack`/`-Rcode` behaviour
+  unchanged. Two crashes remain: `-Rstack` epoch-1 (site known, cause
+  unknown) and `-Rcode` epoch-2 in `FunctionLocation::sweep()`.
   The oracle gap the adversarial review exposed (the original's first
   libquantum run, at input 128, finished before any epoch fired) has since
   been closed: on `libquantum 851 2` the **original survives ~173 epochs
@@ -263,26 +271,26 @@ localised defects. Run both prongs in parallel; neither blocks the other:
    DieHard*, not under glibc malloc — fine for A/B, but a different
    allocator regime.
 2. **Probe the parsa runtime's tractability, using the original as a
-   partial oracle.** Order of attack: first the diagnostic that costs no
-   code — rebuild parsa unmodified with 2013-pinned Heap-Layers/DieHard
-   and re-run; if the `-Rheap` crash vanishes, the defect is version
-   skew, not port logic (the wrappers are byte-identical to upstream's,
-   so "the port broke the wrapper" is already excluded). Then the
-   `-Rheap` `realloc` crash itself (the one path where the original
-   demonstrably passes the same operation); then the `-Rstack`
-   first-epoch crash (site known, cause unknown); then the `-Rcode`
-   second-epoch crash in `FunctionLocation::sweep()` — the path most
-   exercised by sustained re-randomisation, and plausibly related to
-   wherever Dead2's `SZ_CODE` crashes lived (their README records *that*
-   it crashed, not where — inference, not fact). Budget-limit this probe:
-   if the first two bugs resist diagnosis, that is itself the answer.
-   Remember the TLS bug class (magras `4e154b8f`) awaits any workload
-   using thread-local storage. Reproducers and crash logs:
-   `~/prog/stabilizer-parsa-verify/`. Engage Parsa Amini (a two-day
+   partial oracle.** Status: the probe's first rung is already cleared —
+   the `-Rheap` crash is root-caused and fixed (see §1; DieHard
+   `ShuffleHeap` malloc/free bypass asymmetry, guard layer added, ~150
+   epochs verified). The version-skew question is closed: 2013-pinned
+   dependencies do not compile against the port at all, so adaptation was
+   forced and the port's composition was sound apart from this one bug.
+   Remaining rungs: the `-Rstack` first-epoch crash (site known, cause
+   unknown), then the `-Rcode` second-epoch crash in
+   `FunctionLocation::sweep()` — the path most exercised by sustained
+   re-randomisation, and plausibly related to wherever Dead2's `SZ_CODE`
+   crashes lived (their README records *that* it crashed, not where —
+   inference, not fact). Budget-limit these: if they resist diagnosis,
+   that is itself the answer. Remember the TLS bug class (magras
+   `4e154b8f`) awaits any workload using thread-local storage.
+   Reproducers, crash logs and the fix: `~/prog/stabilizer-parsa-verify/`
+   and `~/prog/stabilizer-parsa-fix/`. Engage Parsa Amini (a two-day
    commit burst in Feb 2026, prior burst April 2023 — an intermittent
    solo effort, not an active team) once there is something concrete to
-   offer — subject to the house rule that nothing is posted without
-   Matthias approving the text.
+   offer — one working fix already qualifies — subject to the house rule
+   that nothing is posted without Matthias approving the text.
 3. **Drop Darwin and PPC** (Context test is Mach-O-only anyway), rewrite
    the Python 2 tooling trivially, and treat the **normality replication
    as the first experiment any revived Stabilizer runs** — no independent
@@ -338,9 +346,7 @@ copies was not triaged; Semantic Scholar was rate-limited throughout
 (OpenAlex coverage ≈ 89% of citations); pre-2020 llvm-dev mailing lists were
 not searched; Kristof Beyls's talks are cited second-hand; the
 period-container result is host-specific (an MDWE-hardened host could still
-block RWX pages); the parsa verification built against unpinned
-2026-HEAD Heap-Layers/DieHard, a version-skew confound on the `-Rheap`
-crash (pinned rebuild running); the parsa binaries' CET/property-note
+block RWX pages); the parsa binaries' CET/property-note
 status was not recorded; and neither experiment tested threaded programs,
 C++ exceptions through relocated frames, or any workload beyond the repo's
 own tests. This document was adversarially reviewed once (in-family); the
