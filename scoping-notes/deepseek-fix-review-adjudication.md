@@ -81,8 +81,19 @@ Three further passes at Matthias's request. Outcomes:
   within-seed variance. SCOPING.md corrected; baseline agent re-briefed
   (global interleaving, order covariate, method-of-moments components,
   more seeds over more reps).
-- **Code-heap fix**: first pass returned an empty reply (tool artefact);
-  rerun with tighter context, verdict pending.
+- **Code-heap fix (`deepseek-fix-code-verdict.txt`, rerun after an
+  empty first reply): mechanism confirmed, one latent finding.** It
+  verified no malloc/free classification mismatch exists at the
+  size-class level (request-size vs getSize coincide across the
+  MaxSize boundary for Kingsley classes), then flagged
+  `ShuffleFreeGuard::free(NULL)` dereferencing in `getSize`.
+  Adjudicated: real for the class in isolation, **unreachable in the
+  actual composition** — both heap typedefs wrap the guard in
+  `ANSIWrapper`, whose `free()` and `getSize()` are null-safe
+  (verified, `ansiwrapper.h:63-67, 119-125`; `getSize(NULL)==0` also
+  makes `stabilizer_free(NULL)` correct). A one-line defence-in-depth
+  null guard is queued with the stress agent's micro-fix batch so the
+  class is safe standalone.
 
 The pattern matches the documented expectation: cross-model review is a
 good confirmer and a decent needler (it surfaced the first-four-zeros

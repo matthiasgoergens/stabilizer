@@ -1,0 +1,35 @@
+The change correctly fixes the original crash and, for the size-class mismatch the question asks about, introduces no defect: an object’s classification by `malloc` (using the *requested* size) and by `ShuffleFreeGuard::free` (using `getSize`, which returns the size-class size, e.g., 256) will coincide when `MaxSize=256`.  There is no scenario where `malloc` shuffles but the guard bypasses shuffle in `free`, or vice versa.
+
+**However**, the patch introduces a separate correctness bug:
+
+### Defect – null-pointer dereference in `ShuffleFreeGuard::free`
+
+- **File** : `runtime/Heap.h`, lines 55–61 (post‑fix)  
+- **Class** : `ShuffleFreeGuard<MaxSize, ShuffledHeap, UnshuffledHeap>::free(void* ptr)`
+
+The implementation is:
+
+```cpp
+inline void free(void* ptr) {
+    if (ShuffledHeap::getSize(ptr) > MaxSize) {
+        UnshuffledHeap::free(ptr);
+    } else {
+        ShuffledHeap::free(ptr);
+    }
+}
+```
+
+The original `ShuffleHeap::free()` (and the underlying `KingsleyHeap::free()`) are expected to handle `ptr == NULL` as a no‑op, as required by the C standard.  `ShuffleFreeGuard`, however, calls `ShuffledHeap::getSize(NULL)` without a prior null check.  `getSize` typically dereferences the pointer to read a size header, causing an immediate crash.
+
+**Concrete failure scenario:**
+
+```c++
+CodeHeapType *ch = getCodeHeap();   // uses the new ShuffleFreeGuard
+ch->free(nullptr);                  // crashes with SIGSEGV
+```
+
+This replaces a previously safe `free(NULL)` with a crash, breaking the common assumption that `free(NULL)` is harmless.  The same bug exists in `DataHeapType` (already present before this commit) and is now also introduced in `CodeHeapType`.
+
+The fix should add a null‑pointer guard before calling `getSize`, e.g., `if (!ptr) return;`.
+
+Everything else in the commit looks correct.
