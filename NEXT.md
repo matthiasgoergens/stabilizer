@@ -50,11 +50,12 @@ local commits only; pushing needs Matthias's approval.**
 
 ## In flight
 
-- **-Rcode epoch-2 sweep() crash**: background agent diagnosing on top of
-  f9ed534+29afeef. Prime suspect given the heap fix: same ShuffleHeap
-  asymmetry on the CODE heap (function allocations ≫256 B; the
-  ShuffleFreeGuard was data-heap-only). Success criterion: all three
-  modes combined, libquantum 851 2, ~170 epochs, byte-identical.
+- Nothing. All dispatched work has landed. (-Rcode crash: FIXED, commit
+  19137a3 — same ShuffleHeap asymmetry on the code heap, as suspected.
+  All three modes combined now run ~170 epochs ×3, byte-identical.
+  Port-tractability probe: CLOSED, affirmative. Side-finding: gdb
+  breakpoints corrupt the int3 trap protocol — debugger incompatibility
+  to document alongside strace.)
 
 ## Blocked / pending
 
@@ -88,16 +89,21 @@ local commits only; pushing needs Matthias's approval.**
 
 ## Next actions, in order
 
-1. Collect the -Rcode agent's result; fold into SCOPING.md §1/§3. If all
-   three modes pass combined, the port-tractability question is closed
-   affirmatively (then: propose fixes upstream to parsa — text via
-   Matthias).
-2. Confirm the getRandomByte cycle with a tiny harness (pure userspace,
+1. Confirm the getRandomByte cycle with a tiny harness (pure userspace,
    minutes); update runtime-analysis.md addendum from "derived" to
-   "measured" (or correct it).
-3. Codex pass after quota reset; then decide with Matthias: scale the
-   baseline (BASELINE.md proper: more benchmarks, more reps, Stabilizer
-   arm now that the port heals) vs. write up first.
+   "measured" (or correct it). Also the trivial residual fix:
+   initialise _randCount = sizeof(int) so call 1 refills (kills the
+   first-four-zeros defect).
+2. Codex pass after quota reset (Aug 8 ~20:43): SCOPING.md revision
+   cd2fc63+, and a review of the three fix commits in
+   ~/prog/stabilizer-parsa-fix/stabilizer.
+3. Decisions for Matthias, now unblocked by the probe closing
+   affirmative: (a) push this repo to matthiasgoergens/stabilizer?
+   (b) offer the three fixes to parsa/stabilizer (text for approval
+   first)? (c) scale the baseline to BASELINE.md proper — now can
+   include a working modern-Stabilizer arm, which makes it the full
+   three-way comparison the brief wanted (with the era confound gone,
+   since the port runs on today's toolchain).
 
 Cross-model review of session diffs: not run — no uncommitted diff; codex
 quota-blocked. DeepSeek reviewed the *document* (CONFIRMED), not the code.

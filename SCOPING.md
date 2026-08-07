@@ -129,8 +129,18 @@ cluster), all 163 branches compared, diffs read for everything ahead.
   bug, now guarded. Post-fix: `-Rheap` libquantum survives ~150 epochs
   across 4 runs with byte-identical output; the combined mode advances to
   the known `-Rcode` epoch-2 crash; `-Rstack`/`-Rcode` behaviour
-  unchanged. Two crashes remain: `-Rstack` epoch-1 (site known, cause
-  unknown) and `-Rcode` epoch-2 in `FunctionLocation::sweep()`.
+  unchanged. **Update, same day: all three crashes are now fixed** —
+  `-Rstack` was `getRandomByte()`'s cursor-reset bug (byte-identical in
+  the 2013 original, see §3 item 3), and `-Rcode` was the *same*
+  ShuffleHeap asymmetry as `-Rheap`, on the code heap (every relocated
+  function exceeds the 256 B bypass; gdb: `reqSz=4096`, `ptr` swapped to
+  null). Fix commits `f9ed534`, `29afeef`, `19137a3` in
+  `~/prog/stabilizer-parsa-fix/stabilizer`. Post-fix, the LLVM 21 port
+  runs `libquantum 851 2` under all modes combined for ~165-170 epochs,
+  three independent runs, output byte-identical to the uninstrumented
+  oracle — matching the period original's behaviour. Side-finding: gdb
+  breakpoints corrupt the runtime's `int3` trap protocol (both write
+  0xCC), extending the known ptrace/strace limitation.
   The oracle gap the adversarial review exposed (the original's first
   libquantum run, at input 128, finished before any epoch fired) has since
   been closed: on `libquantum 851 2` the **original survives ~173 epochs
@@ -279,27 +289,25 @@ localised defects. Run both prongs in parallel; neither blocks the other:
    allocation overhead mean that arm measures layout variance *under
    DieHard*, not under glibc malloc — fine for A/B, but a different
    allocator regime.
-2. **Probe the parsa runtime's tractability, using the original as a
-   partial oracle.** Status: the probe's first rung is already cleared —
-   the `-Rheap` crash is root-caused and fixed (see §1; DieHard
-   `ShuffleHeap` malloc/free bypass asymmetry, guard layer added, ~150
-   epochs verified). The version-skew question is closed: 2013-pinned
-   dependencies do not compile against the port at all, so adaptation was
-   forced and the port's composition was sound apart from this one bug.
-   Remaining rungs: the `-Rstack` first-epoch crash (site known, cause
-   unknown), then the `-Rcode` second-epoch crash in
-   `FunctionLocation::sweep()` — the path most exercised by sustained
-   re-randomisation, and plausibly related to wherever Dead2's `SZ_CODE`
-   crashes lived (their README records *that* it crashed, not where —
-   inference, not fact). Budget-limit these: if they resist diagnosis,
-   that is itself the answer. Remember the TLS bug class (magras
-   `4e154b8f`) awaits any workload using thread-local storage.
-   Reproducers, crash logs and the fix: `~/prog/stabilizer-parsa-verify/`
-   and `~/prog/stabilizer-parsa-fix/`. Engage Parsa Amini (a two-day
-   commit burst in Feb 2026, prior burst April 2023 — an intermittent
-   solo effort, not an active team) once there is something concrete to
-   offer — one working fix already qualifies — subject to the house rule
-   that nothing is posted without Matthias approving the text.
+2. **Probe the parsa runtime's tractability — COMPLETE, answer:
+   tractable.** All three characterised crashes root-caused and fixed
+   same-day (`~/prog/stabilizer-parsa-fix/`, commits `f9ed534` `29afeef`
+   `19137a3`): two were one dependency-drift bug worn twice (modern
+   DieHard ShuffleHeap's free-side bypass asymmetry, on the data then
+   the code heap), one was a latent 2013 bug (the RNG cursor reset).
+   Success criterion met: all modes combined, ~170 epochs, three runs,
+   byte-identical output — parity with the period original on this
+   benchmark. The fixes were cross-model reviewed and the review
+   adjudicated (`scoping-notes/deepseek-fix-review-adjudication.md`).
+   The probe condition in the gate above is therefore satisfied; the
+   baseline condition remains open. Known remaining debt for the port
+   proper: the TLS bug class (magras `4e154b8f`) untriggered by
+   libquantum; threads; unwinding; the first-four-zeros RNG residual;
+   debugger incompatibility (gdb/strace vs the `int3` protocol) to
+   document. Engage Parsa Amini (a two-day commit burst in Feb 2026,
+   prior burst April 2023 — an intermittent solo effort, not an active
+   team) with the three fixes — subject to the house rule that nothing
+   is posted without Matthias approving the text.
 3. **Drop Darwin and PPC** (Context test is Mach-O-only anyway), rewrite
    the Python 2 tooling trivially, and treat the **normality replication
    as the first experiment any revived Stabilizer runs** — no independent
