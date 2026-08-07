@@ -3,6 +3,26 @@
 Ideas queued behind the scoping/baseline work. Recorded here so they survive
 the session; none of these is started.
 
+## Meta: old papers and once-working software as a project mine
+
+Observation (Matthias, 2026-08-07, mid-resurrection): "In general, old
+papers and once working software seems to be a great mine for projects."
+This session is supporting evidence: one 2013 paper + bitrotted tool
+yielded, in a day, a working resurrection (three root-caused fixes), two
+bug classes relevant upstream (DieHard's ShuffleHeap free asymmetry; the
+original's RNG cursor bug), a finding about the original paper's own
+validity (stack randomisation partially inert as shipped), and a
+measured, publishable number (51% between-seed variance). The same
+pattern surfaced earlier with Hat → Hoed in Haskell tracing. What makes
+the mine rich: the hard ideas are already validated by publication, the
+bitrot is usually shallower than it looks (here: two dependency-drift
+bugs), and nobody else is looking — thirteen years of forks and not one
+was verified by building. Candidate heuristics for picking targets:
+citation count high but zero maintained implementations; README says
+"unmaintained" but the fork network shows repeated independent revival
+attempts (demand signal); the blocking work is mechanical (API churn)
+rather than conceptual.
+
 ## Phantom-speedup archaeology: re-test historical "performance improvements", revert the ones that were noise
 
 Idea (Matthias, 2026-08-07): look for projects that made performance
