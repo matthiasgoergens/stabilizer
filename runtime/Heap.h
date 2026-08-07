@@ -26,7 +26,31 @@ class CodeSource : public SizeHeap<FreelistHeap<BumpAlloc<CodeSize, MMapSource<C
 // Modern `ShuffleHeap` takes (ChunkSize, MaxSize, SuperHeap). We use a shuffled
 // KingsleyHeap, preserving the original `DataShuffle`/`CodeShuffle` tunables as
 // the maximum shuffled object size.
-typedef ANSIWrapper<ShuffleHeap<4096, DataShuffle, KingsleyHeap<DataSource, DataSource> > > DataHeapType;
+
+// ShuffleHeap::malloc() bypasses its own shuffle buffer for requests bigger
+// than MaxSize, calling SuperHeap::malloc() (KingsleyHeap) directly. But
+// ShuffleHeap::free() has no matching bypass: it always computes a Kingsley
+// bin index for the pointer's real size and swaps it into that bin's
+// shuffle buffer -- even for bins malloc() never filled because every
+// request that size took the bypass. For any object over MaxSize bytes,
+// that swap pulls a null pointer out of a never-filled buffer slot and
+// hands it to SuperHeap::free(), which crashes reading its size header.
+// ShuffleFreeGuard restores malloc()'s bypass for free(), routing anything
+// over MaxSize straight to the unshuffled heap underneath ShuffleHeap
+// instead of through ShuffleHeap's shuffle bookkeeping.
+template <size_t MaxSize, class ShuffledHeap, class UnshuffledHeap>
+class ShuffleFreeGuard : public ShuffledHeap {
+public:
+    inline void free(void* ptr) {
+        if (ShuffledHeap::getSize(ptr) > MaxSize) {
+            UnshuffledHeap::free(ptr);
+        } else {
+            ShuffledHeap::free(ptr);
+        }
+    }
+};
+
+typedef ANSIWrapper<ShuffleFreeGuard<DataShuffle, ShuffleHeap<4096, DataShuffle, KingsleyHeap<DataSource, DataSource> >, KingsleyHeap<DataSource, DataSource> > > DataHeapType;
 typedef ANSIWrapper<ShuffleHeap<4096, CodeShuffle, KingsleyHeap<CodeSource, CodeSource> > > CodeHeapType;
     
 DataHeapType* getDataHeap();
