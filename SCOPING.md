@@ -1,34 +1,47 @@
 # Scoping: is resurrecting Stabilizer the right basis for statistically sound performance evaluation in 2026?
 
-Status: complete, pending adversarial review. Written 2026-08-07. All
-inputs in, including both empirical runs (period container; parsa
-verification).
+Status: adversarially reviewed 2026-08-07 and revised in response — the
+review (in-family refutation agent) found the first draft overclaimed its
+two load-bearing inferences, and this version corrects them. Two
+verification experiments are running as a consequence (original on a
+long-running benchmark with actual re-randomisation epochs; parsa rebuilt
+with 2013-pinned Heap-Layers), and a cross-model codex pass is queued
+behind a quota reset (2026-08-08 evening). Treat the recommendation as
+conditional until those land.
 
 Evidence base: `scoping-notes/` in this repo — `runtime-analysis.md` (source
-read of the runtime and pass), `fork-survey.md` (all 51 repos, 163 branches,
-real diffs), `citation-graph.md` (104 of ~117 citing papers), `llvm-rfc.md`
-(the full RFC/PR/lineage record), `alternatives.md` (tools and practice
-outside the citation graph), plus raw API dumps backing each. Claims below
-cite those files; each of them carries its own explicit coverage statement.
+read of the runtime and pass), `fork-survey.md` (51 repos, all 163 branches
+compared by ahead/behind; diffstats plus commit messages for the 15 ahead
+branches, full patches spot-read for two), `citation-graph.md` (104 of ~117
+citing papers, title-and-abstract triage), `llvm-rfc.md` (the full
+RFC/PR/lineage record), `alternatives.md` (tools and practice outside the
+citation graph), plus raw API dumps backing each. Claims below cite those
+files; each carries its own explicit coverage statement, and this summary
+tries not to claim more than those statements support.
 
 ## The answer in three sentences
 
-Nothing maintained does what Stabilizer did, and the parts of it that have no
-substitute — stack-frame randomisation and *within-run* re-randomisation, the
-property that makes layout noise Gaussian and licenses ANOVA — exist nowhere
-else in any form: not in tools, not in follow-up papers, not in anything LLVM
-considered and rejected (they never considered it). The gap is real, the need
-is documented (criterion.rs has had an open issue asking for exactly this
-since 2019), and both empirical checks landed favourably: the **original
-runs correctly on 2026 hardware** (period container, full `-Rcode -Rheap
--Rstack`, libquantum correct), and **`parsa/stabilizer` builds clean against
-LLVM 21 with PIE working** — its runtime then crashes under sustained
-re-randomisation (three precisely characterised logic bugs, see §1), which
-is a debugging task with a working oracle, not a thirteen-year port. The
-honest framing is therefore not "resurrect a dead project" but "fix three
-characterised runtime bugs in an existing LLVM 21 port, then validate the
-statistics nobody has ever replicated" — with the substantive remaining
-risks being threads, unwinding, and that validation, not API churn.
+Nothing maintained does what Stabilizer did: no tool anywhere combines
+code, stack and heap randomisation with *within-run* re-randomisation, and
+the nearest partial forms are DieHard's per-malloc shuffling (heap only,
+maintained) and security-world re-randomisers (unusable research
+artifacts); LLVM never rejected such a facility — nobody ever proposed one.
+Both empirical checks were encouraging but bounded: the **original builds
+and runs on 2026 hardware** (period container — though its only *real*
+benchmark run finished before any re-randomisation epoch fired, so epochs
+are so far proven only on a trivial stress program; a longer run is in
+flight), and **`parsa/stabilizer` builds clean against LLVM 21 with PIE
+working**, then crashes at three sites under sustained execution — a
+lower bound from one benchmark, with the crash sites located but not yet
+root-caused, a possible Heap-Layers-version confound not yet excluded, and
+at least one further known bug class (TLS, fixed in the magras lineage,
+absent from parsa's ancestry) untriggered by that benchmark. The
+recommendation is therefore **conditional, per the brief's own gate**: run
+the baseline experiment (task 4) to learn whether per-build padding plus
+heap randomisation is good enough, while in parallel probing the port's
+tractability by fixing the first crash — and commit to the full
+resurrection only if the baseline shows the cheap route insufficient and
+the probe shows the port sound.
 
 ## 1. The alternatives, evaluated
 
@@ -89,17 +102,33 @@ cluster), all 163 branches compared, diffs read for everything ahead.
   clang/opt 21.1.8 in rootless podman): builds with zero patches, pass
   loads as a new-PM plugin, HelloWorld runs under every randomisation mode
   as a default PIE binary. But under sustained execution
-  (`tests/libquantum`) every mode crashes before producing output:
+  (`tests/libquantum 851 2`) every mode crashes before producing output:
   `-Rheap` on the program's first `realloc` (in
   `stabilizer_realloc → ShuffleHeap::free → SizeHeap::getSize`, null-derived
   fault) — before any timer fires; `-Rcode` deterministically on the 2nd
   re-randomisation epoch in `FunctionLocation::sweep()`; `-Rstack` on the
-  1st epoch in the stack-pad refresh. These are port logic bugs, not
-  toolchain/kernel blocks — the period-container run of the *original*
-  passes the identical benchmark with all three modes on, so the mechanism
-  is sound, the bugs are localised, and a differential-testing oracle
-  exists. "Tested with LLVM 21" is true of the build and a one-shot trivial
-  program; false for sustained measurement use.
+  1st epoch in the stack-pad refresh (crash site logged, not root-caused).
+  Precision about what this does and does not establish: these are **crash
+  sites, not diagnosed defects**; three is a **lower bound** from one
+  single-threaded C benchmark at one input (a fourth known bug class — TLS
+  access via the relocation table, fixed in the magras lineage — is absent
+  from parsa's ancestry and untriggered by libquantum); and one confound
+  is unexcluded — the verification built against **unpinned 2026-HEAD
+  Heap-Layers and DieHard** while the working original pinned 2013
+  commits, and the `-Rheap` crash bottoms out inside Heap-Layers templates
+  (a pinned rebuild is running as a diagnostic). The wrappers themselves
+  (`stabilizer_realloc`/`stabilizer_free`) are byte-identical to
+  upstream's — verified by direct diff — so the defect is in the port's
+  other changes, its dependencies, or a latent original bug newly exposed.
+  The period-container run of the original provides a genuine shared
+  oracle only for the `realloc` path: its libquantum run (at input 128)
+  completed correctly, but **finished before any re-randomisation epoch
+  fired** (zero "Re-randomization" lines in that log, versus twelve in the
+  stress-test log), so the original has not yet been shown to survive
+  epochs on a real benchmark — a longer run is in flight to establish
+  exactly that. "Tested with LLVM 21" is true of the build and a one-shot
+  trivial program; unproven for sustained measurement use, where every
+  mode currently fails.
 - **`Dead2/stabilizer`** (Hans Kristian Rosbach; *detached* repo, invisible
   to fork-graph walks): LLVM 12, CMake+Docker+CI, multi-contributor, stale
   since 2023-08. Its README is the most honest status report in the whole
@@ -116,10 +145,19 @@ cluster), all 163 branches compared, diffs read for everything ahead.
 
 - **No reimplementation anywhere** (Rust, Go, modern C++): both the
   alternatives sweep and the citation crawl came up empty, independently.
-- **No paper ever replicated or refuted** Stabilizer's normality claim or
-  its O2-vs-O3 headline. Thirteen years, ~117 citations, zero replications
-  (`citation-graph.md`). The claim the whole method rests on has never been
-  independently tested — that is an opportunity as much as a warning.
+- **No replication or refutation found** of Stabilizer's normality claim or
+  its O2-vs-O3 headline — by title-and-abstract triage of 104 of ~117
+  citing papers (`citation-graph.md`; a replication buried in a paper's
+  evaluation section would evade this method). The claim the whole method
+  rests on appears never to have been independently tested — an
+  opportunity as much as a warning. Honest corollary the first draft of
+  this document dodged: thirteen years of nobody building or even
+  formally asking for these properties is also evidence about demand, and
+  the normality argument itself carries less weight in 2026 than in 2013 —
+  bootstrap/permutation/HPT methods make parametric licensing largely
+  optional at benchmark-scale n, so the case for within-run
+  re-randomisation must rest on variance-efficiency per run and on the
+  stack/heap axes, not on "licenses ANOVA" alone.
 - The methodological successors went **statistical instead of mechanical**:
   Kalibera & Jones's effect-size confidence intervals, non-parametric HPT
   (proposed, unmerged, in pyperf). These reduce the *damage* of layout bias;
@@ -134,7 +172,7 @@ cluster), all 163 branches compared, diffs read for everything ahead.
   layout, no frame internals, no allocation order — and no head-to-head
   study of ASLR-as-sampler vs Stabilizer exists (`alternatives.md` §1).
 
-## 2. Can the thing even run on 2026 hardware? Yes — verified empirically.
+## 2. Can the thing even run on 2026 hardware? On this host, yes — verified.
 
 The brief's kernel/CPU risk list mostly dissolved on reading the code
 (`runtime-analysis.md`): RWX `mprotect`/`mmap` is legal by default; CET
@@ -144,12 +182,16 @@ is irrelevant. The period-container experiment then **confirmed this
 empirically** (2026-08-07, full record in
 `~/prog/stabilizer-period/NOTES.md`): LLVM 3.1 + Clang 3.1 built from
 release tarballs in an Ubuntu 12.04 rootless-podman container (no distro
-clang-3.1 package survives; Heap-Layers/DieHard pinned to 2013 commits —
-the unpinned build-time clone in `common.mk` would otherwise fetch 2026
-HEAD), and Stabilizer built clean and **ran correctly under full
-`-Rcode -Rheap -Rstack`** on this host (Arch, kernel 7.1.5, i9-13900K —
-a CET-capable CPU): HelloWorld, a 3 s re-randomisation stress test
-(6 epochs/run, 3 runs), and `tests/libquantum` with correct output.
+clang-3.1 package ever existed in that pool; Heap-Layers/DieHard pinned to
+2013 commits — the unpinned build-time clone in `common.mk` would
+otherwise fetch 2026 HEAD), and Stabilizer built clean and **ran correctly
+under full `-Rcode -Rheap -Rstack`** on this host (Arch, kernel 7.1.5,
+i9-13900K — a CET-capable CPU): HelloWorld, a 3 s re-randomisation stress
+test (6 epochs/run, 3 runs), and `tests/libquantum` with correct output —
+though note the libquantum run (input 128) **completed before the first
+re-randomisation epoch**, so real-benchmark epoch survival is currently
+attested only by the stress program; a `libquantum 851 2` run (~58
+epochs) in all modes is in flight to close that gap.
 `readelf`/`objdump` confirm the binaries carry no CET markings and no
 `endbr64`, so the CPU's CET support is inert for them by the opt-in ABI —
 including the `push`+`ret` trampoline a shadow stack exists to catch.
@@ -162,23 +204,33 @@ Darwin-only (Mach-O yasm), reinforcing "drop Darwin".
 Remaining risks are therefore exactly the ones the source read named:
 threads (the runtime is structurally single-threaded), unwinding (relocated
 code has no `.eh_frame`), and pass/runtime correctness on modern
-toolchains. The parsa verification answered the modern-toolchain half: PIE
-binaries on current glibc *do* work (HelloWorld, all modes) — the crashes
-it found under sustained execution are logic bugs in that port's runtime,
-upstream of any kernel/CPU policy. Between the two experiments, every
-hardware/OS-level risk in the brief is now retired; what remains is
-ordinary (if delicate) systems debugging plus the two structural gaps.
+toolchains. The parsa verification answered part of the modern-toolchain
+question: PIE binaries on current glibc *do* work (HelloWorld, all
+modes) — the sustained-execution crashes are upstream of any kernel/CPU
+policy. Scope this correctly, though: **no hardware/OS-level risk
+materialised on this one permissive host**, for binaries that opt into no
+modern protections (non-PIE or unmarked, no CET notes — and no CET check
+was recorded for the parsa binaries). Both experiments share one kernel
+and one machine; an MDWE-hardened host, a locked-down container runtime,
+or a toolchain that turns on `-fcf-protection` by default (as hardened
+distros do) would each reopen the question. "Retired on this host, with
+these binaries" is the supportable claim.
 
 ## 3. Recommendation
 
-**Yes — resurrecting Stabilizer is the right basis**, on notably better
-terms than the brief assumed, and via `parsa/stabilizer` rather than a
-fresh port. The empirical results resolved the open branches as follows:
-the mechanism runs on 2026 hardware (period container); a clean LLVM 21
-build with working PIE already exists (parsa); and the distance between
-"builds" and "usable" is three precisely characterised runtime crashes
-with reproducers, a deterministic trigger, and a working reference
-implementation to differential-test against. Concretely:
+**Conditional yes — pursue the resurrection via `parsa/stabilizer`, but
+gate the commitment on the baseline experiment, exactly as the brief
+demands** ("only if tasks 1–4 justify it"). What the scoping established:
+the mechanism runs on 2026 hardware (on this host, for unhardened
+binaries); a clean LLVM 21 build with working PIE already exists; and the
+known distance between "builds" and "usable" is three located crash
+sites — a lower bound, not an estimate, from one benchmark, with a
+Heap-Layers-version confound still open and Dead2's year of stalled
+multi-contributor effort as the cautionary prior for the code/stack half.
+What would change the answer to "no": the baseline experiment showing
+per-build padding + DieHard captures most of the layout variance for
+realistic workloads, or the probe fixes revealing structural rather than
+localised defects. Run both prongs in parallel; neither blocks the other:
 
 1. **The baseline experiment (task 4) is worth doing regardless, and should
    be built on `lld/utils/run_benchmark.py` + the original repo's factorial
@@ -197,25 +249,34 @@ implementation to differential-test against. Concretely:
    allocation overhead mean that arm measures layout variance *under
    DieHard*, not under glibc malloc — fine for A/B, but a different
    allocator regime.
-2. **Fix the parsa runtime, using the original as oracle.** Three
-   characterised bugs, in rough order of attack: the `-Rheap` `realloc`
-   crash (likely the easiest — the original passes the same test, so the
-   defect is in the port's heap-wrapper changes; note `libstabilizer.cpp`'s
-   `stabilizer_free` dispatches on `getSize(p) == 0`, a fragile
-   own-heap-vs-foreign-pointer test that the port's rework may have
-   broken); the `-Rstack` first-epoch crash in the pad refresh; the
-   `-Rcode` second-epoch crash in `FunctionLocation::sweep()` — the
-   mark/sweep path `runtime-analysis.md` flagged as highest-risk, and the
-   same region where Dead2's effort stalled. Reproducers and crash logs:
-   `~/prog/stabilizer-parsa-verify/`. Engage Parsa Amini (active three
-   weeks of commits in Feb 2026) once there is something concrete to
+2. **Probe the parsa runtime's tractability, using the original as a
+   partial oracle.** Order of attack: first the diagnostic that costs no
+   code — rebuild parsa unmodified with 2013-pinned Heap-Layers/DieHard
+   and re-run; if the `-Rheap` crash vanishes, the defect is version
+   skew, not port logic (the wrappers are byte-identical to upstream's,
+   so "the port broke the wrapper" is already excluded). Then the
+   `-Rheap` `realloc` crash itself (the one path where the original
+   demonstrably passes the same operation); then the `-Rstack`
+   first-epoch crash (site known, cause unknown); then the `-Rcode`
+   second-epoch crash in `FunctionLocation::sweep()` — the path most
+   exercised by sustained re-randomisation, and plausibly related to
+   wherever Dead2's `SZ_CODE` crashes lived (their README records *that*
+   it crashed, not where — inference, not fact). Budget-limit this probe:
+   if the first two bugs resist diagnosis, that is itself the answer.
+   Remember the TLS bug class (magras `4e154b8f`) awaits any workload
+   using thread-local storage. Reproducers and crash logs:
+   `~/prog/stabilizer-parsa-verify/`. Engage Parsa Amini (a two-day
+   commit burst in Feb 2026, prior burst April 2023 — an intermittent
+   solo effort, not an active team) once there is something concrete to
    offer — subject to the house rule that nothing is posted without
    Matthias approving the text.
 3. **Drop Darwin and PPC** (Context test is Mach-O-only anyway), rewrite
    the Python 2 tooling trivially, and treat the **normality replication
-   as the first experiment any revived Stabilizer runs** — nobody has
-   checked it in thirteen years, and it is the claim everything else
-   stands on.
+   as the first experiment any revived Stabilizer runs** — no independent
+   test of it was found (see §1's epistemic caveat), and it is the claim
+   everything else stands on. If normality fails to replicate, the
+   remaining case for within-run re-randomisation is variance efficiency
+   and the stack/heap axes — decide then whether that is enough.
 
 ## Stretch goal: upstreaming into LLVM proper
 
@@ -264,6 +325,11 @@ copies was not triaged; Semantic Scholar was rate-limited throughout
 (OpenAlex coverage ≈ 89% of citations); pre-2020 llvm-dev mailing lists were
 not searched; Kristof Beyls's talks are cited second-hand; the
 period-container result is host-specific (an MDWE-hardened host could still
-block RWX pages); and neither experiment tested threaded programs, C++
-exceptions through relocated frames, or any workload beyond the repo's own
-tests.
+block RWX pages) and its real-benchmark run included zero re-randomisation
+epochs (being closed now); the parsa verification built against unpinned
+2026-HEAD Heap-Layers/DieHard, a version-skew confound on the `-Rheap`
+crash (pinned rebuild running); the parsa binaries' CET/property-note
+status was not recorded; and neither experiment tested threaded programs,
+C++ exceptions through relocated frames, or any workload beyond the repo's
+own tests. This document was adversarially reviewed once (in-family); the
+cross-model pass is pending quota.
