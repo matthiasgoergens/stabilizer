@@ -23,6 +23,38 @@ citation count high but zero maintained implementations; README says
 attempts (demand signal); the blocking work is mechanical (API churn)
 rather than conceptual.
 
+Addendum (same day): mine by *lab signature*, not just by paper. Matthias
+recalled "moving GC for C via overlaying sparse pages" — that is Mesh
+(Powers/Tench/Berger/McGregor, PLDI 2019, plasma-umass/Mesh, still
+maintained as of 2026-03). Same PLASMA lab as Stabilizer/DieHard/Coz;
+their common signature is "randomness + virtual-memory tricks against
+unmanaged-code constraints". A lab with one resurrectable hit likely has
+siblings: the maintained ones (Mesh, DieHard, Coz) are design references
+and tooling, the dead ones are candidates. Mesh is also a candidate
+second randomising-allocator arm for BASELINE.md (checks DieHard-arm
+findings are not allocator-specific).
+
+## Give Mesh a serious AFL++ run
+
+(Matthias, 2026-08-07.) Mesh is dormant-but-alive (last push 2026-03-25 —
+five months quiet; note "alive" is repo metadata, not a build
+verification — first step is confirming it builds against current
+clang/glibc at all). It is a production-intent allocator whose meshing
+path (copy live objects between pages, remap two virtual pages onto one
+physical page, under concurrency) is exactly the kind of rarely-exercised
+machinery fuzzing finds bugs in — and the DieHard ShuffleHeap asymmetry
+we just root-caused shows this code family's free-path edge cases go
+unnoticed for years. Shape: reuse the stabilizer-stress approach — a
+stdin-driven malloc/free/realloc op-sequence shim linked against
+libmesh, ASAN+UBSAN, hypothesis for structured adversarial sequences
+(sizes straddling size-class and page-occupancy boundaries to force
+meshing), then AFL++ for long campaigns; specifically try to trigger
+meshing during mutation (allocate to ~50% page occupancy, free
+alternating objects, keep allocating during the mesh window). Any find
+is upstreamable to a maintained repo with a responsive owner — quick
+feedback loop, and a natural companion PR to the DieHard/ShuffleHeap
+report if we send that.
+
 ## Phantom-speedup archaeology: re-test historical "performance improvements", revert the ones that were noise
 
 Idea (Matthias, 2026-08-07): look for projects that made performance
