@@ -259,6 +259,15 @@ localised defects. Run both prongs in parallel; neither blocks the other:
    normality machinery as specification). It answers the question the LLD
    flag's own authors never asked: how much of the layout variance does
    per-build padding capture, and are its samples Gaussian?
+   A pilot of exactly this design has now run
+   (`~/prog/stabilizer-baseline/`, 90 runs, libquantum, host clang/lld
+   22.1.8, P-core pinned, ASLR on): within-build CV 0.71%; under 10
+   padding seeds total CV 1.77% with **50.75% of variance between
+   seeds** — the layout lottery is real and measurable here, and a
+   design that ignores it needs ~6× the runs to detect a 1% effect.
+   Pilot-scale caveats (3 reps/seed, one benchmark) and an unexplained
+   within-seed-CV anomaly are recorded in its NOTES.md rather than
+   smoothed over; the normality numbers at this n decide nothing yet.
    Add a **DieHard arm**: `LD_PRELOAD`ing DieHard (maintained, same lab —
    and mechanically the same idea as Stabilizer's own ShuffleHeap) closes
    exactly the heap gap Collingbourne named and never built, for the cost of
@@ -298,6 +307,16 @@ localised defects. Run both prongs in parallel; neither blocks the other:
    everything else stands on. If normality fails to replicate, the
    remaining case for within-run re-randomisation is variance efficiency
    and the stack/heap axes — decide then whether that is enough.
+   The replication just acquired an extra reason to exist: fixing the
+   port's `-Rstack` crash exposed that **the original's stack-pad
+   randomness was largely broken as shipped** — `getRandomByte()` returns
+   four zero bytes, then cycles a 256-byte window that is ~98% adjacent
+   `.bss` contents and ~2% RNG output (bug byte-identical in the 2013
+   source; full derivation in `runtime-analysis.md` addendum, to be
+   confirmed with a small harness before quoting externally). The paper's
+   `stack` ablation therefore ran with partially inert randomisation, and
+   a fixed-RNG replication may genuinely move the numbers — in either
+   direction.
 
 ## Stretch goal: upstreaming into LLVM proper
 

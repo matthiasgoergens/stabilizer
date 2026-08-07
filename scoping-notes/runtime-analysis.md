@@ -118,6 +118,42 @@ container experiment should confirm this cheaply.
   no-op — the set is cleared in `onTimer` — but telling); the `Jump.h` range
   bug above; PPC support already half-commented-out.
 
+## Addendum (2026-08-07, post-fix): the original's stack randomness was largely broken
+
+Found while fixing the port's `-Rstack` crash (`~/prog/stabilizer-parsa-fix/
+NOTES.md`), then characterised fully from this repo's own `runtime/Util.h`
+(byte-identical bug in the 2013 original). `getRandomByte()`:
+
+- `_randCount` starts at 0 over a zero-initialised 4-byte union, and the
+  refill condition is `== sizeof(int)`, so the **first four calls return
+  0x00 without ever consulting the RNG**.
+- On call 5 it refills once but resets the cursor to `sizeof(int)` instead
+  of 0, and `_randCount` is a `uint8_t` that keeps incrementing — so it
+  **wraps at 256**. Steady state: a repeating 256-byte read window starting
+  at the union, of which 4 bytes per cycle are fresh randomness and the
+  other 252 are **whatever static data follows in `.bss`** (out-of-bounds
+  but usually mapped; in the parsa build the union landed at the exact end
+  of `.bss`, which is why it finally crashed in 2026).
+- Sole consumer: the stack pads (`Function.cpp:65`, `onTimer`'s pad
+  refresh). Code placement and heap shuffling use other RNGs.
+
+Consequence, stated carefully: in the tool as shipped — including, as far
+as this source shows, the builds behind the ASPLOS 2013 results — the
+per-epoch stack pad bytes were drawn mostly from fixed adjacent memory,
+not from the RNG. Stack offsets still varied (the window's contents are
+not all equal, and the cursor position advances per call), but the
+distribution is far from the designed uniform byte. Two implications:
+(1) any replication of the paper's `stack` ablation must use the fixed
+RNG (`_randCount = 0` on refill) and may get *different* results from the
+paper; (2) the paper's headline conclusions survived with stack
+randomisation partially inert, which weakens "the stack axis mattered" as
+an argument for the port — or strengthens it, if fixed-randomness stack
+pads turn out to change the numbers. Either way it is a finding to
+verify empirically and, once verified, worth reporting upstream to the
+original authors (with the usual approval gate before anything is
+posted). Derivation is from source read; the 256-wrap cycle should be
+confirmed with a 10-line harness before it is quoted anywhere external.
+
 ## Sizing
 
 The whole system is ~2 100 lines (runtime ~1 100, pass ~1 000). The mechanism
