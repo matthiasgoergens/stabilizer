@@ -1,0 +1,34 @@
+commit 6b25cfbb98b25bb3d127e7b7fd462e6dcf3f9f7e
+Author: Peter Collingbourne <peter@pcc.me.uk>
+Date:   Fri May 2 17:35:12 2025 -0700
+
+    Add lld benchmarking script.
+    
+    The purpose of this script is to measure the performance effect
+    of an lld change in a statistically sound way, automating all the
+    tedious parts of doing so. It copies the test case into /tmp as well as
+    running the test binaries from /tmp to reduce the influence on the test
+    machine's storage medium on the results. It accounts for measurement
+    bias caused by binary layout (using the --randomize-section-padding
+    flag to link the test binaries) and by environment variable size
+    (implemented by hyperfine [1]). Runs of the base and test case are
+    interleaved to account for environmental factors which may influence
+    the result due to the passage of time. The results of running hyperfine
+    are collected into a results.csv file in the output directory and
+    may be analyzed by the user with a tool such as ministat.
+    
+    Requirements: Linux host, hyperfine [2] in $PATH, run from a build
+    directory configured to use ninja and a recent version of lld that
+    supports --randomize-section-padding, /tmp is tmpfs.
+    
+    [1] https://github.com/sharkdp/hyperfine/blob/3cedcc38d0c430cbf38b4364b441c43a938d2bf3/src/util/randomized_environment_offset.rs#L1
+    [2] https://github.com/sharkdp/hyperfine
+    
+    Reviewers: rnk, MaskRay, smithp35
+    
+    Reviewed By: rnk
+    
+    Pull Request: https://github.com/llvm/llvm-project/pull/138367
+
+ lld/utils/run_benchmark.py | 151 +++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 151 insertions(+)

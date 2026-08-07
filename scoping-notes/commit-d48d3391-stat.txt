@@ -1,0 +1,31 @@
+commit d48d339156916b4dd87a8c06c1c242fd794f08e5
+Author: Rafael Ávila de Espíndola <rafael@espindo.la>
+Date:   Wed Feb 19 13:19:58 2020 -0800
+
+    [lld][ELF] Add --shuffle-sections=seed to shuffle input sections
+    
+    Summary:
+    This option causes lld to shuffle sections by assigning different
+    priorities in each run.
+    
+    The use case for this is to introduce randomization in benchmarks. The
+    idea is inspired by the paper "Producing Wrong Data Without Doing
+    Anything Obviously Wrong!"
+    (https://www.inf.usi.ch/faculty/hauswirth/publications/asplos09.pdf). Unlike
+    the paper, we shuffle individual sections, not just input files.
+    
+    Doing this in lld is particularly convenient as the --reproduce option
+    makes it easy to collect all the necessary bits for relinking the
+    program being benchmarked. Once that it is done, all that is needed is
+    to add --shuffle-sections=0 to the response file and relink before each
+    run of the benchmark.
+    
+    Differential Revision: https://reviews.llvm.org/D74791
+
+ lld/ELF/Config.h                |  1 +
+ lld/ELF/Driver.cpp              |  2 ++
+ lld/ELF/Options.td              |  2 ++
+ lld/ELF/Writer.cpp              | 22 +++++++++++++++++++
+ lld/docs/ld.lld.1               |  2 ++
+ lld/test/ELF/shuffle-sections.s | 47 +++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 76 insertions(+)

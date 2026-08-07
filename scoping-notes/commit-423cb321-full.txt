@@ -1,0 +1,85 @@
+commit 423cb321dfae8a57f878974ce81730d5ee612f95
+Author: Fangrui Song <i@maskray.me>
+Date:   Wed Mar 17 09:32:44 2021 -0700
+
+    [ELF] Special case --shuffle-sections=-1 to reverse input sections
+    
+    If the number of sections changes, which is common for re-links after
+    incremental updates, the section order may change drastically.
+    
+    Special case -1 to reverse input sections. This is a stable transform.
+    The section order is more resilient to incremental updates.  Usually the
+    code issue (e.g. Static Initialization Order Fiasco, assuming pointer
+    comparison result of two unrelated objects) is due to the relative order
+    between two problematic input files A and B.  Checking the regular order
+    and the reversed order is sufficient.
+    
+    Differential Revision: https://reviews.llvm.org/D98445
+
+diff --git a/lld/ELF/Options.td b/lld/ELF/Options.td
+index 302afd2a4374..ee4a0610d362 100644
+--- a/lld/ELF/Options.td
++++ b/lld/ELF/Options.td
+@@ -587,7 +587,8 @@ defm lto_unique_basic_block_section_names: BB<"lto-unique-basic-block-section-na
+     "Give unique names to every basic block section for LTO",
+     "Do not give unique names to every basic block section for LTO (default)">;
+ def shuffle_sections: JJ<"shuffle-sections=">, MetaVarName<"<seed>">,
+-  HelpText<"Shuffle input sections using the given seed. If 0, use a random seed">;
++  HelpText<"Shuffle input sections using the given seed. "
++  "If -1, reverse the section order. If 0, use a random seed">;
+ def thinlto_cache_dir: JJ<"thinlto-cache-dir=">,
+   HelpText<"Path to ThinLTO cached object file directory">;
+ defm thinlto_cache_policy: EEq<"thinlto-cache-policy", "Pruning policy for the ThinLTO cache">;
+diff --git a/lld/ELF/Writer.cpp b/lld/ELF/Writer.cpp
+index 7a505ff8cfa1..f0d4e6e4e685 100644
+--- a/lld/ELF/Writer.cpp
++++ b/lld/ELF/Writer.cpp
+@@ -1301,8 +1301,15 @@ static void maybeShuffle(DenseMap<const InputSectionBase *, int> &order) {
+   for (int &prio : priorities)
+     prio = curPrio++;
+   uint32_t seed = *config->shuffleSectionSeed;
+-  std::mt19937 g(seed ? seed : std::random_device()());
+-  llvm::shuffle(priorities.begin(), priorities.end(), g);
++  if (seed == UINT32_MAX) {
++    // If --shuffle-sections=-1, reverse the section order. The section order is
++    // stable even if the number of sections changes. This is useful to catch
++    // issues like static initialization order fiasco reliably.
++    std::reverse(priorities.begin(), priorities.end());
++  } else {
++    std::mt19937 g(seed ? seed : std::random_device()());
++    llvm::shuffle(priorities.begin(), priorities.end(), g);
++  }
+   int prioIndex = 0;
+   for (InputSectionBase *sec : inputSections) {
+     if (order.try_emplace(sec, priorities[prioIndex]).second)
+diff --git a/lld/docs/ld.lld.1 b/lld/docs/ld.lld.1
+index 42525df76ada..3c1704c0c5e8 100644
+--- a/lld/docs/ld.lld.1
++++ b/lld/docs/ld.lld.1
+@@ -487,7 +487,8 @@ Set address of section.
+ .It Fl -shared , Fl -Bsharable
+ Build a shared object.
+ .It Fl -shuffle-sections Ns = Ns Ar seed
+-Shuffle input sections using the given seed. If 0, use a random seed.
++Shuffle input sections using the given seed.
++If -1, reverse the section order. If 0, use a random seed.
+ .It Fl -soname Ns = Ns Ar value , Fl h Ar value
+ Set
+ .Dv DT_SONAME
+diff --git a/lld/test/ELF/shuffle-sections.s b/lld/test/ELF/shuffle-sections.s
+index bc0f57b98d7a..59b0642d639c 100644
+--- a/lld/test/ELF/shuffle-sections.s
++++ b/lld/test/ELF/shuffle-sections.s
+@@ -26,6 +26,12 @@
+ # SHUFFLE3: Hex dump of section '.text':
+ # SHUFFLE3-NEXT: 02cccccc 010403
+ 
++## As a special case, -1 reverses sections as a stable transform.
++# RUN: ld.lld --shuffle-sections=-1 %t.o -o %t-1.out
++# RUN: llvm-readelf -x .text %t-1.out | FileCheck %s --check-prefix=SHUFFLE-1
++# SHUFFLE-1: Hex dump of section '.text':
++# SHUFFLE-1-NEXT: 040302cc 01
++
+ ## .text has an alignment of 4.
+ .global _start
+ _start:

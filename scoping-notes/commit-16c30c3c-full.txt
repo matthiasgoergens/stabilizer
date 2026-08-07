@@ -1,0 +1,306 @@
+commit 16c30c3c23ef02c0227256bb6f2005a574517de9
+Author: Fangrui Song <i@maskray.me>
+Date:   Thu Mar 18 10:18:19 2021 -0700
+
+    [ELF] Change --shuffle-sections=<seed> to --shuffle-sections=<section-glob>=<seed>
+    
+    `--shuffle-sections=<seed>` applies to all sections.  The new
+    `--shuffle-sections=<section-glob>=<seed>` makes shuffling selective.  To the
+    best of my knowledge, the option is only used as debugging, so just drop the
+    original form.
+    
+    `--shuffle-sections '.init_array*=-1'` `--shuffle-sections '.fini_array*=-1'`.
+    reverses static constructors/destructors of the same priority.
+    Useful to detect some static initialization order fiasco.
+    
+    `--shuffle-sections '.data*=-1'`
+    reverses `.data*` sections. Useful to detect unfunded pointer comparison results
+    of two unrelated objects.
+    
+    If certain sections have an intrinsic order, the old form cannot be used.
+    
+    Differential Revision: https://reviews.llvm.org/D98679
+
+diff --git a/lld/ELF/Config.h b/lld/ELF/Config.h
+index fcfe5f64c32f..ab55c60bb6f9 100644
+--- a/lld/ELF/Config.h
++++ b/lld/ELF/Config.h
+@@ -198,7 +198,7 @@ struct Configuration {
+   bool relocatable;
+   bool relrPackDynRelocs;
+   bool saveTemps;
+-  llvm::Optional<uint32_t> shuffleSectionSeed;
++  std::vector<std::pair<llvm::GlobPattern, uint32_t>> shuffleSections;
+   bool singleRoRx;
+   bool shared;
+   bool symbolic;
+diff --git a/lld/ELF/Driver.cpp b/lld/ELF/Driver.cpp
+index df9925d74f8a..3401c016dbe9 100644
+--- a/lld/ELF/Driver.cpp
++++ b/lld/ELF/Driver.cpp
+@@ -1068,8 +1068,6 @@ static void readConfigs(opt::InputArgList &args) {
+   config->rpath = getRpath(args);
+   config->relocatable = args.hasArg(OPT_relocatable);
+   config->saveTemps = args.hasArg(OPT_save_temps);
+-  if (args.hasArg(OPT_shuffle_sections))
+-    config->shuffleSectionSeed = args::getInteger(args, OPT_shuffle_sections, 0);
+   config->searchPaths = args::getStrings(args, OPT_library_path);
+   config->sectionStartMap = getSectionStartMap(args);
+   config->shared = args.hasArg(OPT_shared);
+@@ -1149,6 +1147,24 @@ static void readConfigs(opt::InputArgList &args) {
+       config->optEL = true;
+   }
+ 
++  for (opt::Arg *arg : args.filtered(OPT_shuffle_sections)) {
++    constexpr StringRef errPrefix = "--shuffle-sections=: ";
++    std::pair<StringRef, StringRef> kv = StringRef(arg->getValue()).split('=');
++    if (kv.first.empty() || kv.second.empty()) {
++      error(errPrefix + "expected <section_glob>=<seed>, but got '" +
++            arg->getValue() + "'");
++      continue;
++    }
++    // Signed so that <section_glob>=-1 is allowed.
++    int64_t v;
++    if (!to_integer(kv.second, v))
++      error(errPrefix + "expected an integer, but got '" + kv.second + "'");
++    else if (Expected<GlobPattern> pat = GlobPattern::create(kv.first))
++      config->shuffleSections.emplace_back(std::move(*pat), uint32_t(v));
++    else
++      error(errPrefix + toString(pat.takeError()));
++  }
++
+   for (opt::Arg *arg : args.filtered(OPT_z)) {
+     std::pair<StringRef, StringRef> option =
+         StringRef(arg->getValue()).split('=');
+diff --git a/lld/ELF/Options.td b/lld/ELF/Options.td
+index ee4a0610d362..55bde53cddcb 100644
+--- a/lld/ELF/Options.td
++++ b/lld/ELF/Options.td
+@@ -586,9 +586,10 @@ def lto_basic_block_sections: JJ<"lto-basic-block-sections=">,
+ defm lto_unique_basic_block_section_names: BB<"lto-unique-basic-block-section-names",
+     "Give unique names to every basic block section for LTO",
+     "Do not give unique names to every basic block section for LTO (default)">;
+-def shuffle_sections: JJ<"shuffle-sections=">, MetaVarName<"<seed>">,
+-  HelpText<"Shuffle input sections using the given seed. "
+-  "If -1, reverse the section order. If 0, use a random seed">;
++defm shuffle_sections: EEq<"shuffle-sections",
++  "Shuffle matched sections using the given seed before mapping them to the output sections. "
++  "If -1, reverse the section order. If 0, use a random seed">,
++  MetaVarName<"<section-glob>=<seed>">;
+ def thinlto_cache_dir: JJ<"thinlto-cache-dir=">,
+   HelpText<"Path to ThinLTO cached object file directory">;
+ defm thinlto_cache_policy: EEq<"thinlto-cache-policy", "Pruning policy for the ThinLTO cache">;
+diff --git a/lld/ELF/Writer.cpp b/lld/ELF/Writer.cpp
+index f0d4e6e4e685..5f5f7ccb4d35 100644
+--- a/lld/ELF/Writer.cpp
++++ b/lld/ELF/Writer.cpp
+@@ -1291,29 +1291,39 @@ findOrphanPos(std::vector<BaseCommand *>::iterator b,
+ 
+ // Adds random priorities to sections not already in the map.
+ static void maybeShuffle(DenseMap<const InputSectionBase *, int> &order) {
+-  if (!config->shuffleSectionSeed)
++  if (config->shuffleSections.empty())
+     return;
+ 
+-  std::vector<int> priorities(inputSections.size() - order.size());
++  std::vector<InputSectionBase *> matched, sections = inputSections;
++  matched.reserve(sections.size());
++  for (const auto &patAndSeed : config->shuffleSections) {
++    matched.clear();
++    for (InputSectionBase *sec : sections)
++      if (patAndSeed.first.match(sec->name))
++        matched.push_back(sec);
++    const uint32_t seed = patAndSeed.second;
++    if (seed == UINT32_MAX) {
++      // If --shuffle-sections <section-glob>=-1, reverse the section order. The
++      // section order is stable even if the number of sections changes. This is
++      // useful to catch issues like static initialization order fiasco
++      // reliably.
++      std::reverse(matched.begin(), matched.end());
++    } else {
++      std::mt19937 g(seed ? seed : std::random_device()());
++      llvm::shuffle(matched.begin(), matched.end(), g);
++    }
++    size_t i = 0;
++    for (InputSectionBase *&sec : sections)
++      if (patAndSeed.first.match(sec->name))
++        sec = matched[i++];
++  }
++
+   // Existing priorities are < 0, so use priorities >= 0 for the missing
+   // sections.
+-  int curPrio = 0;
+-  for (int &prio : priorities)
+-    prio = curPrio++;
+-  uint32_t seed = *config->shuffleSectionSeed;
+-  if (seed == UINT32_MAX) {
+-    // If --shuffle-sections=-1, reverse the section order. The section order is
+-    // stable even if the number of sections changes. This is useful to catch
+-    // issues like static initialization order fiasco reliably.
+-    std::reverse(priorities.begin(), priorities.end());
+-  } else {
+-    std::mt19937 g(seed ? seed : std::random_device()());
+-    llvm::shuffle(priorities.begin(), priorities.end(), g);
+-  }
+-  int prioIndex = 0;
+-  for (InputSectionBase *sec : inputSections) {
+-    if (order.try_emplace(sec, priorities[prioIndex]).second)
+-      ++prioIndex;
++  int prio = 0;
++  for (InputSectionBase *sec : sections) {
++    if (order.try_emplace(sec, prio).second)
++      ++prio;
+   }
+ }
+ 
+diff --git a/lld/docs/ReleaseNotes.rst b/lld/docs/ReleaseNotes.rst
+index 3684e99cb80c..a3b577e48fb1 100644
+--- a/lld/docs/ReleaseNotes.rst
++++ b/lld/docs/ReleaseNotes.rst
+@@ -29,7 +29,8 @@ ELF Improvements
+ Breaking changes
+ ----------------
+ 
+-* ...
++* ``--shuffle-sections=<seed>`` has been changed to ``--shuffle-sections=<section-glob>=<seed>``.
++  Specify ``*`` as ``<section-glob>`` to get the previous behavior.
+ 
+ COFF Improvements
+ -----------------
+diff --git a/lld/docs/ld.lld.1 b/lld/docs/ld.lld.1
+index 3c1704c0c5e8..37c42a0eb51f 100644
+--- a/lld/docs/ld.lld.1
++++ b/lld/docs/ld.lld.1
+@@ -487,7 +487,7 @@ Set address of section.
+ .It Fl -shared , Fl -Bsharable
+ Build a shared object.
+ .It Fl -shuffle-sections Ns = Ns Ar seed
+-Shuffle input sections using the given seed.
++Shuffle matched sections using the given seed before mapping them to the output sections.
+ If -1, reverse the section order. If 0, use a random seed.
+ .It Fl -soname Ns = Ns Ar value , Fl h Ar value
+ Set
+diff --git a/lld/test/ELF/gnu-ifunc-plt.s b/lld/test/ELF/gnu-ifunc-plt.s
+index 540bfbc5325c..58fae803a0e5 100644
+--- a/lld/test/ELF/gnu-ifunc-plt.s
++++ b/lld/test/ELF/gnu-ifunc-plt.s
+@@ -80,9 +80,9 @@
+ // Test that --shuffle-sections does not affect the order of relocations and that
+ // we still place IRELATIVE relocations last. Check both random seed (0) and an
+ // arbitrary seed that was known to break the order of relocations previously (3).
+-// RUN: ld.lld --shuffle-sections=3 %t.so %t.o -o %tout2
++// RUN: ld.lld --shuffle-sections='*=3' %t.so %t.o -o %tout2
+ // RUN: llvm-readobj --relocations %tout2 | FileCheck %s --check-prefix=SHUFFLE
+-// RUN: ld.lld --shuffle-sections=0 %t.so %t.o -o %tout3
++// RUN: ld.lld --shuffle-sections='*=0' %t.so %t.o -o %tout3
+ // RUN: llvm-readobj --relocations %tout3 | FileCheck %s --check-prefix=SHUFFLE
+ 
+ // SHUFFLE:      Section {{.*}} .rela.dyn {
+diff --git a/lld/test/ELF/shuffle-sections-init-fini.s b/lld/test/ELF/shuffle-sections-init-fini.s
+index d98ca8d359de..4ddbf6cb7483 100644
+--- a/lld/test/ELF/shuffle-sections-init-fini.s
++++ b/lld/test/ELF/shuffle-sections-init-fini.s
+@@ -5,7 +5,7 @@
+ # RUN: llvm-readelf -x .init -x .fini -x .init_array -x .fini_array %t | \
+ # RUN:   FileCheck --check-prefixes=CHECK,ORDERED %s
+ 
+-# RUN: ld.lld %t.o --shuffle-sections=1 -o %t1
++# RUN: ld.lld %t.o --shuffle-sections '*=1' -o %t1
+ # RUN: llvm-readelf -x .init -x .fini -x .init_array -x .fini_array %t1 | \
+ # RUN:   FileCheck --check-prefixes=CHECK,SHUFFLED %s
+ 
+@@ -21,12 +21,12 @@
+ # CHECK:      Hex dump of section '.init_array'
+ # CHECK-NEXT: 0x{{[0-9a-f]+}} ff
+ # ORDERED-SAME: 000102 03040506 0708090a 0b
+-# SHUFFLED-SAME: 04000b 06010a08 09070203 05
++# SHUFFLED-SAME: 080301 04050907 0b020a06 00
+ 
+ # CHECK:      Hex dump of section '.fini_array'
+ # CHECK-NEXT: 0x{{[0-9a-f]+}} ff
+ # ORDERED-SAME:  000102 03040506 0708090a 0b
+-# SHUFFLED-SAME: 090401 070b0003 080a0605 02
++# SHUFFLED-SAME: 0a0405 08070b02 03090006 01
+ 
+ ## With a SECTIONS command, SHT_INIT_ARRAY prirotities are ignored.
+ ## All .init_array* are shuffled together.
+@@ -36,13 +36,13 @@
+ # RUN: ld.lld -T %t.script %t.o -o %t2
+ # RUN: llvm-readelf -x .init -x .fini -x .init_array -x .fini_array %t2 | \
+ # RUN:   FileCheck --check-prefixes=CHECK2,ORDERED2 %s
+-# RUN: ld.lld -T %t.script %t.o --shuffle-sections=1 -o %t3
++# RUN: ld.lld -T %t.script %t.o --shuffle-sections '*=1' -o %t3
+ # RUN: llvm-readelf -x .init -x .fini -x .init_array -x .fini_array %t3 | \
+ # RUN:   FileCheck --check-prefixes=CHECK2,SHUFFLED2 %s
+ 
+ # CHECK2:       Hex dump of section '.init_array'
+ # ORDERED2-NEXT:  0x{{[0-9a-f]+}} 00010203 04050607 08090a0b ff
+-# SHUFFLED2-NEXT: 0x{{[0-9a-f]+}} 04000b06 010a0809 07ff0203 05
++# SHUFFLED2-NEXT: 0x{{[0-9a-f]+}} 08030104 0509070b 02ff0a06 00
+ 
+ .irp i,0,1,2,3,4,5,6,7,8,9,10,11
+   .section .init,"ax",@progbits,unique,\i
+diff --git a/lld/test/ELF/shuffle-sections.s b/lld/test/ELF/shuffle-sections.s
+index 59b0642d639c..8211c482732b 100644
+--- a/lld/test/ELF/shuffle-sections.s
++++ b/lld/test/ELF/shuffle-sections.s
+@@ -7,31 +7,53 @@
+ # CHECK-NEXT: 01020304
+ 
+ ## --shuffle-sections= shuffles input sections.
+-# RUN: ld.lld --shuffle-sections=1 %t.o -o %t1.out
++# RUN: ld.lld --shuffle-sections='*=1' %t.o -o %t1.out
+ # RUN: llvm-readelf -x .text %t1.out | FileCheck %s --check-prefix=SHUFFLE1
+ # SHUFFLE1: Hex dump of section '.text':
+-# SHUFFLE1-NEXT: 0204cccc 0103
++# SHUFFLE1-NEXT: 0203cccc 0104
+ 
+ ## Test that --shuffle-sections= can be used with --symbol-ordering-file
+ # RUN: echo "foo" > %t_order.txt
+ # RUN: echo "_start " >> %t_order.txt
+ 
+-# RUN: ld.lld --symbol-ordering-file %t_order.txt --shuffle-sections=2 %t.o -o %t2.out
++# RUN: ld.lld --symbol-ordering-file %t_order.txt --shuffle-sections='*=2' %t.o -o %t2.out
+ # RUN: llvm-readelf -x .text %t2.out | FileCheck %s --check-prefix=SHUFFLE2
+ # SHUFFLE2: Hex dump of section '.text':
+-# SHUFFLE2-NEXT: 02cccccc 010304
++# SHUFFLE2-NEXT: 02cccccc 010403
+ 
+-# RUN: ld.lld --symbol-ordering-file %t_order.txt --shuffle-sections=3 %t.o -o %t3.out
++# RUN: ld.lld --symbol-ordering-file %t_order.txt --shuffle-sections='*=3' %t.o -o %t3.out
+ # RUN: llvm-readelf -x .text %t3.out | FileCheck %s --check-prefix=SHUFFLE3
+ # SHUFFLE3: Hex dump of section '.text':
+ # SHUFFLE3-NEXT: 02cccccc 010403
+ 
+ ## As a special case, -1 reverses sections as a stable transform.
+-# RUN: ld.lld --shuffle-sections=-1 %t.o -o %t-1.out
++# RUN: ld.lld --shuffle-sections '*=-1' %t.o -o %t-1.out
+ # RUN: llvm-readelf -x .text %t-1.out | FileCheck %s --check-prefix=SHUFFLE-1
+ # SHUFFLE-1: Hex dump of section '.text':
+ # SHUFFLE-1-NEXT: 040302cc 01
+ 
++## .text does not change its order while .text.{foo,bar,zed} are reversed.
++# RUN: ld.lld --shuffle-sections '.text.*=-1' %t.o -o %t4.out
++# RUN: llvm-readelf -x .text %t4.out | FileCheck %s --check-prefix=SHUFFLE4
++# SHUFFLE4: Hex dump of section '.text':
++# SHUFFLE4-NEXT: 01040302
++
++## Reversing twice restores the original order.
++# RUN: ld.lld --shuffle-sections '.text.*=-1' --shuffle-sections '.text.*=-1' %t.o -o %t.out
++# RUN: llvm-readelf -x .text %t.out | FileCheck %s
++
++## Test all possible invalid cases.
++# RUN: not ld.lld --shuffle-sections= 2>&1 | FileCheck %s --check-prefix=USAGE -DV=
++# RUN: not ld.lld --shuffle-sections=a= 2>&1 | FileCheck %s --check-prefix=USAGE -DV=a=
++# RUN: not ld.lld --shuffle-sections==0 2>&1 | FileCheck %s --check-prefix=USAGE -DV==0
++# RUN: not ld.lld --shuffle-sections=a 2>&1 | FileCheck %s --check-prefix=USAGE -DV=a
++
++# USAGE: error: --shuffle-sections=: expected <section_glob>=<seed>, but got '[[V]]'
++
++# RUN: not ld.lld --shuffle-sections='['=0 2>&1 | FileCheck %s --check-prefix=INVALID
++
++# INVALID: error: --shuffle-sections=: invalid glob pattern: [
++
+ ## .text has an alignment of 4.
+ .global _start
+ _start:

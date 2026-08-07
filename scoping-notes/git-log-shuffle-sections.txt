@@ -1,0 +1,9 @@
+cc88a5e61578 [lld-macho,NFC] Switch to increasing priorities
+b9cf1769de54 [lld][ELF] remove empty SyntheticSections from inputSections
+16c30c3c23ef [ELF] Change --shuffle-sections=<seed> to --shuffle-sections=<section-glob>=<seed>
+423cb321dfae [ELF] Special case --shuffle-sections=-1 to reverse input sections
+c135a68d426f [LLD][ELF] - Do not produce an invalid dynamic relocation order with --shuffle-sections.
+e20a215992dc [ELF] Add convenience TableGen classes to enforce two dashes for options not supported by GNU ld
+7b44f0428af4 Add a llvm::shuffle and use it in lld
+dbd7281aa775 [ELF] Shuffle .init_array/.fini_array with --shuffle-sections=
+d48d33915691 [lld][ELF] Add --shuffle-sections=seed to shuffle input sections

@@ -1,0 +1,2 @@
+16c30c3c23ef [ELF] Change --shuffle-sections=<seed> to --shuffle-sections=<section-glob>=<seed>
+d48d33915691 [lld][ELF] Add --shuffle-sections=seed to shuffle input sections

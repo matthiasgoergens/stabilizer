@@ -1,0 +1,129 @@
+commit dbd7281aa775a0e23c43a02583593900cd4c05be
+Author: Fangrui Song <i@maskray.me>
+Date:   Wed Feb 19 23:14:49 2020 -0800
+
+    [ELF] Shuffle .init_array/.fini_array with --shuffle-sections=
+    
+    Useful for detecting static initialization order fiasco.
+    
+    Reviewed By: grimar
+    
+    Differential Revision: https://reviews.llvm.org/D74887
+
+diff --git a/lld/ELF/Writer.cpp b/lld/ELF/Writer.cpp
+index 9c89b41f0e2c..be9273fc2095 100644
+--- a/lld/ELF/Writer.cpp
++++ b/lld/ELF/Writer.cpp
+@@ -1355,6 +1355,19 @@ static void sortSection(OutputSection *sec,
+                         const DenseMap<const InputSectionBase *, int> &order) {
+   StringRef name = sec->name;
+ 
++  // Never sort these.
++  if (name == ".init" || name == ".fini")
++    return;
++
++  // Sort input sections by priority using the list provided by
++  // --symbol-ordering-file or --shuffle-sections=. This is a least significant
++  // digit radix sort. The sections may be sorted stably again by a more
++  // significant key.
++  if (!order.empty())
++    for (BaseCommand *b : sec->sectionCommands)
++      if (auto *isd = dyn_cast<InputSectionDescription>(b))
++        sortISDBySectionOrder(isd, order);
++
+   // Sort input sections by section name suffixes for
+   // __attribute__((init_priority(N))).
+   if (name == ".init_array" || name == ".fini_array") {
+@@ -1370,10 +1383,6 @@ static void sortSection(OutputSection *sec,
+     return;
+   }
+ 
+-  // Never sort these.
+-  if (name == ".init" || name == ".fini")
+-    return;
+-
+   // .toc is allocated just after .got and is accessed using GOT-relative
+   // relocations. Object files compiled with small code model have an
+   // addressable range of [.got, .got + 0xFFFC] for GOT-relative relocations.
+@@ -1391,13 +1400,6 @@ static void sortSection(OutputSection *sec,
+                       });
+     return;
+   }
+-
+-  // Sort input sections by priority using the list provided
+-  // by --symbol-ordering-file.
+-  if (!order.empty())
+-    for (BaseCommand *b : sec->sectionCommands)
+-      if (auto *isd = dyn_cast<InputSectionDescription>(b))
+-        sortISDBySectionOrder(isd, order);
+ }
+ 
+ // If no layout was provided by linker script, we want to apply default
+diff --git a/lld/test/ELF/shuffle-sections-init-fini.s b/lld/test/ELF/shuffle-sections-init-fini.s
+new file mode 100644
+index 000000000000..d8e4832fb7fe
+--- /dev/null
++++ b/lld/test/ELF/shuffle-sections-init-fini.s
+@@ -0,0 +1,62 @@
++# REQUIRES: x86
++# RUN: llvm-mc -filetype=obj -triple=x86_64 %s -o %t.o
++
++# RUN: ld.lld %t.o -o %t
++# RUN: llvm-readelf -x .init -x .fini -x .init_array -x .fini_array %t | \
++# RUN:   FileCheck --check-prefixes=CHECK,ORDERED %s
++
++# RUN: ld.lld %t.o --shuffle-sections=1 -o %t1
++# RUN: llvm-readelf -x .init -x .fini -x .init_array -x .fini_array %t1 | \
++# RUN:   FileCheck --check-prefixes=CHECK,SHUFFLED %s
++
++## .init and .fini rely on a particular order, e.g. crti.o crtbegin.o crtend.o crtn.o
++## Don't shuffle them.
++# CHECK:      Hex dump of section '.init'
++# CHECK-NEXT: 00010203 04050607 08090a0b
++
++# CHECK:      Hex dump of section '.fini'
++# CHECK-NEXT: 00010203 04050607 08090a0b
++
++## SHT_INIT_ARRAY/SHT_FINI_ARRAY with explicit priorities are still ordered.
++# CHECK:      Hex dump of section '.init_array'
++# CHECK-NEXT: 0x{{[0-9a-f]+}} ff
++# ORDERED-SAME: 000102 03040506 0708090a 0b
++# SHUFFLED-NOT: 000102 03040506 0708090a 0b
++
++# CHECK:      Hex dump of section '.fini_array'
++# CHECK-NEXT: 0x{{[0-9a-f]+}} ff
++# ORDERED-SAME: 000102 03040506 0708090a 0b
++# SHUFFLED-NOT: 000102 03040506 0708090a 0b
++
++## With a SECTIONS command, SHT_INIT_ARRAY prirotities are ignored.
++## All .init_array* are shuffled together.
++# RUN: echo 'SECTIONS {}' > %t.script
++# RUN: ld.lld -T %t.script %t.o -o %t2
++# RUN: llvm-readelf -x .init -x .fini -x .init_array -x .fini_array %t2 | \
++# RUN:   FileCheck --check-prefixes=CHECK2,ORDERED2 %s
++# RUN: ld.lld -T %t.script %t.o --shuffle-sections=1 -o %t3
++# RUN: llvm-readelf -x .init -x .fini -x .init_array -x .fini_array %t3 | \
++# RUN:   FileCheck --check-prefixes=CHECK2,SHUFFLED2 %s
++
++# CHECK2:       Hex dump of section '.init_array'
++# ORDERED2-NEXT:  0x{{[0-9a-f]+}} 00010203 04050607 08090a0b ff
++# SHUFFLED2-NOT:  0x{{[0-9a-f]+}} 00010203 04050607 08090a0b ff
++
++## std::shuffle have different implementations.
++## When the number of input sections are large, it is almost guaranteed
++## to have an unordered result with --shuffle-sections=.
++.irp i,0,1,2,3,4,5,6,7,8,9,10,11
++  .section .init,"ax",@progbits,unique,\i
++  .byte \i
++  .section .fini,"ax",@progbits,unique,\i
++  .byte \i
++  .section .init_array,"aw",@init_array,unique,\i
++  .byte \i
++  .section .fini_array,"aw",@fini_array,unique,\i
++  .byte \i
++.endr
++
++.section .init_array.1,"aw",@init_array
++.byte 255
++.section .fini_array.1,"aw",@fini_array
++.byte 255

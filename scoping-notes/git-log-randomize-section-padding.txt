@@ -1,0 +1,2 @@
+6b25cfbb98b2 Add lld benchmarking script.
+64da33a58923 ELF: Introduce --randomize-section-padding option.

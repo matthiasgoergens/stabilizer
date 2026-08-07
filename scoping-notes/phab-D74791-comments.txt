@@ -1,0 +1,338 @@
+================================================================================
+This option causes lld to shuffle sections by assigning different 
+priorities in each run. 
+
+ The use case for this is to introduce randomization in benchmarks. The 
+idea is inspired by the paper "Producing Wrong Data Without Doing 
+Anything Obviously Wrong!" 
+( https://www.inf.usi.ch/faculty/hauswirth/publications/asplos09.pdf ). Unlike 
+the paper, we shuffle individual sections, not just input files. 
+
+ Doing this in lld is particularly convenient as the --reproduce option 
+makes it easy to collect all the necessary bits for relinking the 
+program being benchmarked. Once that it is done, all that is needed is 
+to add --shuffle-sections=0 to the response file and relink before each 
+run of the benchmark.
+
+================================================================================
+I think It'd be useful to add --shuffle-sections=seed, so that the result can be reproducible. 
+
+ =0 : random seed 
+ =seed : specified seed 
+
+ Making --shuffle-sections= work with --symbol-ordering-file= won't be too difficult. We can assign natural numbers to sections without a negative priority. 
+
+ We actually already have some approaches to disturb the layout a bit: 
+
+ -z noseparate-code vs -z separate-code vs -z separate-loadable-segments : change addresses 
+ INPUT [BEFORE|AFTER] : change output section orders. 
+
+ A way that disturbing the layout of input sections will also be useful.
+
+================================================================================
+Indent by 2.
+
+================================================================================
+Indent by 2.
+
+================================================================================
++1 to idea about adding a seed. 
+Also this needs a test case. At least you can check that the option is accepted and perhaps seed 
+should allow to show that a layout produced is somehow different with/without this option for example.
+
+================================================================================
+Probably worth updating this comment as it is misleading.
+
+================================================================================
+Probably worth updating this comment as it is misleading.
+
+================================================================================
+I do not think we use _ in variable names in LLD.
+
+================================================================================
+I do not think we use _ in variable names in LLD.
+
+================================================================================
+Can it be just like the following? 
+
+ for (int &prio : priorities)
+ prio = cur_prio--; 
+
+ (It could be just std::iota(priorities.begin(), priorities.end(), -priorities.size()); btw, 
+but it is still uncommon for LLD to use algorithms like that I think).
+
+================================================================================
+Can it be just like the following? 
+
+ for (int &prio : priorities)
+ prio = cur_prio--; 
+
+ (It could be just std::iota(priorities.begin(), priorities.end(), -priorities.size()); btw, 
+but it is still uncommon for LLD to use algorithms like that I think).
+
+================================================================================
+No need to have curly bracers around a single line.
+
+================================================================================
+No need to have curly bracers around a single line.
+
+================================================================================
+Added a seed value to the command line option. 
+
+ Made it work with other section sorting options, like --symbol-ordering-file by shuffling only sections without a priority. 
+
+ Added a test.
+
+================================================================================
+Delete braces around simple statements.
+
+================================================================================
+Delete braces around simple statements.
+
+================================================================================
+Add MetaVarName<seed>
+
+================================================================================
+Add MetaVarName<seed>
+
+================================================================================
+End with a period.
+
+================================================================================
+End with a period.
+
+================================================================================
+Does const uint32_t & -> uint32_t work?
+
+================================================================================
+Does const uint32_t & -> uint32_t work?
+
+================================================================================
+std::mt19937 g(seed ? seed : std::random_device()());
+
+================================================================================
+std::mt19937 g(seed ? seed : std::random_device()());
+
+================================================================================
+try_emplace avoids std::make_pair 
+
+ p can be deleted
+
+================================================================================
+try_emplace avoids std::make_pair 
+
+ p can be deleted
+
+================================================================================
+Nit: -triple=x86_64 (general ELF) makes it clear this is not Linux specific (applies to FreeBSD, etc).
+
+================================================================================
+Nit: -triple=x86_64 (general ELF) makes it clear this is not Linux specific (applies to FreeBSD, etc).
+
+================================================================================
+%t1.out 
+
+ I think you intended to differentiate output filenames.
+
+================================================================================
+%t1.out 
+
+ I think you intended to differentiate output filenames.
+
+================================================================================
+Nit: llvm-readelf -x .text is slightly better. 
+
+ llvm-objdump's output, except -d , is usually strange.
+
+================================================================================
+Nit: llvm-readelf -x .text is slightly better. 
+
+ llvm-objdump's output, except -d , is usually strange.
+
+================================================================================
+symbol-ordering-file-shuffle.s 
+
+ I think shuffle-sections.s may be a better name.
+
+================================================================================
+symbol-ordering-file-shuffle.s 
+
+ I think shuffle-sections.s may be a better name.
+
+================================================================================
+Address review comments.
+
+================================================================================
+Thanks for the review. Could someone please commit it for me? 
+
+ Thanks
+
+================================================================================
+Update docs/ld.lld.1
+
+================================================================================
+Improve tests
+
+================================================================================
+Hi, I think this might be triggering the test failures seen on buildbot with: 
+
+ Testing: 0.. 10.. 20.. 30.. 40.. 50.. 60.. 70.
+FAIL: lld :: ELF/shuffle-sections.s (1760 of 2286)
+******************** TEST 'lld :: ELF/shuffle-sections.s' FAILED ********************
+Script:
+--
+: 'RUN: at line 2'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/llvm-mc -filetype=obj -triple=x86_64 /b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s -o /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.o
+: 'RUN: at line 4'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/ld.lld /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.o -o /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.out
+: 'RUN: at line 5'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/llvm-readelf -x .text /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.out | /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/FileCheck /b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s
+: 'RUN: at line 10'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/ld.lld --shuffle-sections=1 /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.o -o /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp1.out
+: 'RUN: at line 11'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/llvm-readelf -x .text /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp1.out | /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/FileCheck /b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s --check-prefix=SHUFFLE1
+: 'RUN: at line 16'; echo "foo" > /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp_order.txt
+: 'RUN: at line 17'; echo "_start " >> /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp_order.txt
+: 'RUN: at line 19'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/ld.lld --symbol-ordering-file /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp_order.txt --shuffle-sections=2 /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.o -o /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp2.out
+: 'RUN: at line 20'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/llvm-readelf -x .text /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp2.out | /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/FileCheck /b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s --check-prefix=SHUFFLE2
+: 'RUN: at line 24'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/ld.lld --symbol-ordering-file /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp_order.txt --shuffle-sections=3 /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.o -o /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp3.out
+: 'RUN: at line 25'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/llvm-readelf -x .text /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp3.out | /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/FileCheck /b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s --check-prefix=SHUFFLE3
+--
+Exit Code: 1
+
+Command Output (stderr):
+--
+/b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s:13:18: error: SHUFFLE1-NEXT: expected string not found in input
+# SHUFFLE1-NEXT: 01020403
+ ^
+<stdin>:2:1: note: scanning from here
+0x00201120 01040203 ....
+^
+<stdin>:2:12: note: possible intended match here
+0x00201120 01040203 ....
+ ^
+
+--
+
+********************
+Testing: 0.. 10.. 20.. 30.. 40.. 50.. 60.. 70.. 80.. 90.. 
+
+Testing Time: 22.86s
+********************
+Failing Tests (1):
+ lld :: ELF/shuffle-sections.s 
+
+ Could you send out a fix or revert this patch? Thanks. 
+
+ Our builder log: https://luci-milo.appspot.com/p/fuchsia/builders/ci/clang-linux-x64/b8887989700445045680
+
+================================================================================
+It is also failing in at least 2 of the public bots: 
+
+ http://lab.llvm.org:8011/builders/lld-x86_64-darwin13/builds/40747 
+ http://lab.llvm.org:8011/builders/lld-x86_64-win7/builds/40718
+
+================================================================================
+In D74791#1883878 , @leonardchan wrote: 
+ Hi, I think this might be triggering the test failures seen on buildbot with: 
+
+ Testing: 0.. 10.. 20.. 30.. 40.. 50.. 60.. 70.
+FAIL: lld :: ELF/shuffle-sections.s (1760 of 2286)
+******************** TEST 'lld :: ELF/shuffle-sections.s' FAILED ********************
+Script:
+--
+: 'RUN: at line 2'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/llvm-mc -filetype=obj -triple=x86_64 /b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s -o /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.o
+: 'RUN: at line 4'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/ld.lld /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.o -o /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.out
+: 'RUN: at line 5'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/llvm-readelf -x .text /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.out | /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/FileCheck /b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s
+: 'RUN: at line 10'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/ld.lld --shuffle-sections=1 /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.o -o /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp1.out
+: 'RUN: at line 11'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/llvm-readelf -x .text /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp1.out | /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/FileCheck /b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s --check-prefix=SHUFFLE1
+: 'RUN: at line 16'; echo "foo" > /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp_order.txt
+: 'RUN: at line 17'; echo "_start " >> /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp_order.txt
+: 'RUN: at line 19'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/ld.lld --symbol-ordering-file /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp_order.txt --shuffle-sections=2 /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.o -o /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp2.out
+: 'RUN: at line 20'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/llvm-readelf -x .text /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp2.out | /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/FileCheck /b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s --check-prefix=SHUFFLE2
+: 'RUN: at line 24'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/ld.lld --symbol-ordering-file /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp_order.txt --shuffle-sections=3 /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp.o -o /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp3.out
+: 'RUN: at line 25'; /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/llvm-readelf -x .text /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/tools/lld/test/ELF/Output/shuffle-sections.s.tmp3.out | /b/s/w/ir/k/recipe_cleanup/clangeEWbUm/llvm_build_dir/bin/FileCheck /b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s --check-prefix=SHUFFLE3
+--
+Exit Code: 1
+
+Command Output (stderr):
+--
+/b/s/w/ir/k/llvm-project/lld/test/ELF/shuffle-sections.s:13:18: error: SHUFFLE1-NEXT: expected string not found in input
+# SHUFFLE1-NEXT: 01020403
+ ^
+<stdin>:2:1: note: scanning from here
+0x00201120 01040203 ....
+^
+<stdin>:2:12: note: possible intended match here
+0x00201120 01040203 ....
+ ^
+
+--
+
+********************
+Testing: 0.. 10.. 20.. 30.. 40.. 50.. 60.. 70.. 80.. 90.. 
+
+Testing Time: 22.86s
+********************
+Failing Tests (1):
+ lld :: ELF/shuffle-sections.s 
+
+ Could you send out a fix or revert this patch? Thanks. 
+
+ Our builder log: https://luci-milo.appspot.com/p/fuchsia/builders/ci/clang-linux-x64/b8887989700445045680 
+
+ Fixed. I forgot that libstdc++, libc++, msvc and even different versions of these C++ standard libraries can have different random function implementations. We can't rely on any particular order.
+
+================================================================================
+The issue reproduces with: 
+
+ cmake -GNinja '-DLLVM_ENABLE_PROJECTS=clang;lld' '-DLLVM_ENABLE_RUNTIMES=libcxx;libcxxabi;libunwind' -DCMAKE_BUILD_TYPE=Release -DCLANG_BOOTSTRAP_TARGETS=check-lld -DCLANG_ENABLE_BOOTSTRAP=ON -DCLANG_DEFAULT_CXX_STDLIB=libc++ -DLIBCXX_ENABLE_SHARED=OFF -DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON ../llvm/ 
+ninja stage2-check-lld 
+
+ I think the problems is with std::shuffle, not the pseudo random number generation. We could copy the libc++ version to llvm's support library to get the same results in any architecture. Does that sounds like a reasonable idea?
+
+================================================================================
+In D74791#1884140 , @respindola wrote: 
+ Does that sounds like a reasonable idea? 
+
+ Personally I think it might be OK. 
+Perhaps worth to look at other usings of std::shuffle in LLVM. I've found a few, but at first look 
+it is unclear to me if they might win from switching to llvm::shuffle . If they can - it might help to 
+justify such addition.
+
+================================================================================
+Delete braces around simple statements.
+
+================================================================================
+Add MetaVarName<seed>
+
+================================================================================
+End with a period.
+
+================================================================================
+Does const uint32_t & -> uint32_t work?
+
+================================================================================
+std::mt19937 g(seed ? seed : std::random_device()());
+
+================================================================================
+Probably worth updating this comment as it is misleading.
+
+================================================================================
+try_emplace avoids std::make_pair 
+
+ p can be deleted
+
+================================================================================
+Indent by 2.
+
+================================================================================
+I do not think we use _ in variable names in LLD.
+
+================================================================================
+Can it be just like the following? 
+
+ for (int &prio : priorities)
+ prio = cur_prio--; 
+
+ (It could be just std::iota(priorities.begin(), priorities.end(), -priorities.size()); btw, 
+but it is still uncommon for LLD to use algorithms like that I think).
+
+================================================================================
+No need to have curly bracers around a single line.
+

@@ -1,0 +1,103 @@
+====================================================================================================
+POST 1 by pcc at 2024-11-26T00:42:49.482Z
+URL: https://discourse.llvm.org/t/83334/1
+Various forms of measurement bias exist when measuring the effect of a performance optimization. Some of these are highlighted in the paper, Producing Wrong Data Without Doing Anything Obviously Wrong! This RFC presents a technique specifically for controlling the measurement bias referred to as “link order” in the paper. At Google we found that changes to code generation can impact performance results in unexpected ways, especially when the magnitude of the true performance difference is small. The hypothesis is that code size dependent measurement bias occurs as a result of moving code into locations that happen to be more or less favorable to CPU caches and/or the TLB.
+The basic idea for controlling for this measurement bias is to use a linker feature for constructing “counterfactuals”, i.e. binaries that are still realistic but have been modified to impact cache favorability. Using these binaries, we can perform several A/B experiments, and by averaging the results of these experiments we can measure the performance effect of a change given an average cache favorability level. In this way, we can know what the average effect of an optimization or other code change would be, and not just what its effect happens to be on two specific binaries used for benchmarking, which would have essentially random cache favorability levels.
+Previous work in this area includes the –shuffle-sections flag to LLD, which causes the section order to be shuffled according to the result of a random number generator. However, –shuffle-sections has the following downsides:
+
+It randomizes section layout, which is not a realistic counterfactual because functions in the same TU are normally clustered together, and this by itself can cause performance regressions due to decreased locality that may lead to measurement bias.
+It prevents the use of the feature together with section layout optimizing features such as Propeller, call-graph sorting and –symbol-ordering-file. So for example if you are trying to measure the performance impact of a change to Propeller, you wouldn’t be able to use --shuffle-sections to control for measurement bias while doing so.
+
+This proposal is to add a –shuffle-padding=SEED flag to LLD. This flag is intended to produce a counterfactual in which the sizes of various functions are slightly larger. We can consider this to be a more realistic counterfactual, because it can be thought of as representing a future version of the program in which changes to the code have increased the sizes of various functions.
+Specifically, the flag would do two things:
+
+Randomly introduce small amounts of padding between sections according to an RNG seeded with SEED. Specifically, it would work as follows: for each input section in an output section, read one byte of random data from the RNG. If the byte is less than some constant representing padding probability, insert sh_addralign bytes of padding before the input section. By default, the flag would only have an effect on output sections that cannot have start/stop symbols, such as .text, .rodata, .data.rel.ro and so on.
+Insert a random amount of padding (between 0 and max-page-size) at the start of each segment (PT_LOAD) using the same RNG.
+
+To control for the measurement bias, a user would need to build their program with -ffunction-sections and set up N A/B experiments, each passing a different seed at link time. The same seed would be passed in the base and experiment case. Each of the A/B experiments will involve M trials. This will give us M*N percentage differences, and we can average the percentage differences and perform a T test to compute the confidence interval.
+It should be noted that this is by no means a perfect control for the measurement bias because the insertion of padding would itself introduce a measurement bias, but the magnitude of the bias is expected to be less than with –shuffle-sections, especially with a low padding probability.
+For the time being, the probability of inserting padding is hardcoded to 1 in 16. However, we may consider making this configurable.
+
+====================================================================================================
+POST 2 by pcc at 2024-11-26T00:44:41.568Z
+URL: https://discourse.llvm.org/t/83334/2
+Pull request: ELF: Introduce --shuffle-padding flag. by pcc · Pull Request #117653 · llvm/llvm-project · GitHub
+
+====================================================================================================
+POST 3 by smithp35 at 2024-11-26T13:40:43.253Z
+URL: https://discourse.llvm.org/t/83334/3
+An interesting idea, which looks like it can be implemented without a lot of additional code.
+For future community use of the option it would be great to see this applied to a set of benchmarks with the lessons learned from it. That could help others plan their own experiments with this option. That’s outside the scope of a PR though, perhaps a blog-post or future LLVM dev meeting topic.
+Many simpler CPUs also suffer from noise caused by different starting addresses. For example in order CPUs with limited dual issue capability.
+Many years ago now, Kristof Beyls gave a couple of presentations that involve noise in benchmarks:
+
+https://www.youtube.com/watch?v=9UliHoRYjZI Automated performance-tracking of LLVM-generated code
+Towards ameliorating measurement bias in evaluating performance of generated code
+
+Giving these a quick skim, random perturbation is mentioned, I think at one point being done at the basic block level rather than at link time, to see what effect it had. Running multiple experiments on regular performance tracking was deemed to be too expensive given the speed of the machines running the benchmarks though. Some benchmarks were affected a lot more than others too.
+
+====================================================================================================
+POST 4 by peterwaller-arm at 2024-11-27T21:07:16.097Z
+URL: https://discourse.llvm.org/t/83334/4
+I’ve been thinking in this area and I like this proposal, it makes sense to me.
+It’s a bit orthogonal to what you’re trying to achieve but I’ve also just posted a patch which adds the possibility of inserting chosen padding before functions using bolt as well, here, which may also be of interest: [BOLT] Add --pad-funcs-before=func:n by peterwaller-arm · Pull Request #117924 · llvm/llvm-project · GitHub
+
+====================================================================================================
+POST 5 by maksfb at 2024-12-05T03:52:19.624Z
+URL: https://discourse.llvm.org/t/83334/5
+@pcc I’d like to hear your thoughts on running performance measurement on a binary with “optimal” layout on A and B side? E.g. applying BOLT (or Propeller) on both sides instead of introducing randomization? My gut feeling that it’s a preferable technique for comparing the performance of production-sized binaries, but I can’t back it up with empirical data or research.
+
+====================================================================================================
+POST 6 by peterwaller-arm at 2024-12-05T11:29:59.002Z
+URL: https://discourse.llvm.org/t/83334/6
+BOLT aims to optimize layout, but does not take into account all potential micro-architectural effects that might be possible in a given core. Therefore, we expect that by slightly perturbing the “BOLT-optimal” layout, differences in performance may be observed in some workloads.
+Being able to measure the performance impact of these perturbations can help with understanding whether slight variations in layout chosen by BOLT could result in noisy performance results. Having more methods of observation here could also lead to additional heuristics that could be employed by BOLT to extract more performance.
+
+====================================================================================================
+POST 7 by maksfb at 2024-12-10T22:07:22.019Z
+URL: https://discourse.llvm.org/t/83334/7
+That’s a fair point. Our goal in BOLT is to optimize for any architectural effects as well. Such an example is the macro-fusion alignment that we’ve introduced for x86. No doubt, it’s hard to cover all possible cases.
+
+====================================================================================================
+POST 8 by emeryberger at 2025-05-06T16:02:08.310Z
+URL: https://discourse.llvm.org/t/83334/8
+Hi all - just found out about this effort, which is great! As a point of information, my research group produced a pretty extensive randomization approach designed to control for measurement bias (the problem pointed out by the Mytkowicz et al. paper cited above), called Stabilizer, which also appeared at ASPLOS and which was inspired by that work.
+Stabilizer works differently than what is proposed here and also goes beyond it in some ways. It was implemented in LLVM but a very old version, so the code is very much not directly usable, but the approach is described pretty thoroughly in our paper: STABILIZER: statistically sound performance evaluation. This blog post is a nice summary. The WASMtime folks also have discussed using a number of the techniques we outline.
+From the paper:
+
+Researchers and software developers require effective performance
+evaluation. Researchers must evaluate optimizations or measure
+overhead. Software developers use automatic performance regression tests to discover when changes improve or degrade performance.
+The standard methodology is to compare execution times before and
+after applying changes.
+Unfortunately, modern architectural features make this approach
+unsound. Statistically sound evaluation requires multiple samples
+to test whether one can or cannot (with high confidence) reject the
+null hypothesis that results are the same before and after. However,
+caches and branch predictors make performance dependent on
+machine-specific parameters and the exact layout of code, stack
+frames, and heap objects. A single binary constitutes just one sample
+from the space of program layouts, regardless of the number of runs.
+Since compiler optimizations and code changes also alter layout, it
+is currently impossible to distinguish the impact of an optimization
+from that of its layout effects.
+This paper presents STABILIZER, a system that enables the use of
+the powerful statistical techniques required for sound performance
+evaluation on modern architectures. STABILIZER forces executions
+to sample the space of memory configurations by repeatedly rerandomizing layouts of code, stack, and heap objects at runtime.
+STABILIZER thus makes it possible to control for layout effects.
+Re-randomization also ensures that layout effects follow a Gaussian
+distribution, enabling the use of statistical tests like ANOVA. We
+demonstrate STABILIZER’s efficiency (< 7% median overhead) and
+its effectiveness by evaluating the impact of LLVM’s optimizations
+on the SPEC CPU2006 benchmark suite. We find that, while -O2
+has a significant impact relative to -O1, the performance impact of
+-O3 over -O2 optimizations is indistinguishable from random noise.
+
+====================================================================================================
+POST 9 by pcc at 2025-05-07T19:47:00.271Z
+URL: https://discourse.llvm.org/t/83334/9
+Thanks Emery, I’ve also heard about Stabilizer.
+I recently developed a script for benchmarking changes to lld itself that IIUC does almost all of what Stabilizer does except for heap randomization. It would be great to see a similar script developed for benchmarking clang or maybe even generalized somehow for benchmarking other projects.
+Now I’m wondering if heap randomization wouldn’t be too hard to implement on top of that. We can LD_PRELOAD a library that intercepts calls to malloc() and with low probability increases the size argument so as to move the allocation to the next size class. It’s a less comprehensive approach than the one that Stabilizer uses but maybe it’s good enough.
+

@@ -1,0 +1,168 @@
+commit d48d339156916b4dd87a8c06c1c242fd794f08e5
+Author: Rafael Ávila de Espíndola <rafael@espindo.la>
+Date:   Wed Feb 19 13:19:58 2020 -0800
+
+    [lld][ELF] Add --shuffle-sections=seed to shuffle input sections
+    
+    Summary:
+    This option causes lld to shuffle sections by assigning different
+    priorities in each run.
+    
+    The use case for this is to introduce randomization in benchmarks. The
+    idea is inspired by the paper "Producing Wrong Data Without Doing
+    Anything Obviously Wrong!"
+    (https://www.inf.usi.ch/faculty/hauswirth/publications/asplos09.pdf). Unlike
+    the paper, we shuffle individual sections, not just input files.
+    
+    Doing this in lld is particularly convenient as the --reproduce option
+    makes it easy to collect all the necessary bits for relinking the
+    program being benchmarked. Once that it is done, all that is needed is
+    to add --shuffle-sections=0 to the response file and relink before each
+    run of the benchmark.
+    
+    Differential Revision: https://reviews.llvm.org/D74791
+
+diff --git a/lld/ELF/Config.h b/lld/ELF/Config.h
+index dc43534f20ad..81c42b6e8517 100644
+--- a/lld/ELF/Config.h
++++ b/lld/ELF/Config.h
+@@ -182,6 +182,7 @@ struct Configuration {
+   bool relocatable;
+   bool relrPackDynRelocs;
+   bool saveTemps;
++  llvm::Optional<uint32_t> shuffleSectionSeed;
+   bool singleRoRx;
+   bool shared;
+   bool isStatic = false;
+diff --git a/lld/ELF/Driver.cpp b/lld/ELF/Driver.cpp
+index 06512e2689ae..c59776d6ef2f 100644
+--- a/lld/ELF/Driver.cpp
++++ b/lld/ELF/Driver.cpp
+@@ -956,6 +956,8 @@ static void readConfigs(opt::InputArgList &args) {
+   config->rpath = getRpath(args);
+   config->relocatable = args.hasArg(OPT_relocatable);
+   config->saveTemps = args.hasArg(OPT_save_temps);
++  if (args.hasArg(OPT_shuffle_sections))
++    config->shuffleSectionSeed = args::getInteger(args, OPT_shuffle_sections, 0);
+   config->searchPaths = args::getStrings(args, OPT_library_path);
+   config->sectionStartMap = getSectionStartMap(args);
+   config->shared = args.hasArg(OPT_shared);
+diff --git a/lld/ELF/Options.td b/lld/ELF/Options.td
+index d642e8189576..307c781b87e4 100644
+--- a/lld/ELF/Options.td
++++ b/lld/ELF/Options.td
+@@ -499,6 +499,8 @@ def opt_remarks_format: Separate<["--"], "opt-remarks-format">,
+   HelpText<"The format used for serializing remarks (default: YAML)">;
+ defm plugin_opt: Eq<"plugin-opt", "specifies LTO options for compatibility with GNU linkers">;
+ def save_temps: F<"save-temps">;
++def shuffle_sections: J<"shuffle-sections=">, MetaVarName<"<seed>">,
++  HelpText<"Shuffle input sections using the given seed. If 0, use a random seed">;
+ def thinlto_cache_dir: J<"thinlto-cache-dir=">,
+   HelpText<"Path to ThinLTO cached object file directory">;
+ defm thinlto_cache_policy: Eq<"thinlto-cache-policy", "Pruning policy for the ThinLTO cache">;
+diff --git a/lld/ELF/Writer.cpp b/lld/ELF/Writer.cpp
+index e3e39ac95e7f..ee681fa4892e 100644
+--- a/lld/ELF/Writer.cpp
++++ b/lld/ELF/Writer.cpp
+@@ -1205,6 +1205,27 @@ findOrphanPos(std::vector<BaseCommand *>::iterator b,
+   return i;
+ }
+ 
++// Adds random priorities to sections not already in the map.
++static void maybeShuffle(DenseMap<const InputSectionBase *, int> &order) {
++  if (!config->shuffleSectionSeed)
++    return;
++
++  std::vector<int> priorities(inputSections.size() - order.size());
++  // Existing priorities are < 0, so use priorities >= 0 for the missing
++  // sections.
++  int curPrio = 0;
++  for (int &prio : priorities)
++    prio = curPrio++;
++  uint32_t seed = *config->shuffleSectionSeed;
++  std::mt19937 g(seed ? seed : std::random_device()());
++  std::shuffle(priorities.begin(), priorities.end(), g);
++  int prioIndex = 0;
++  for (InputSectionBase *sec : inputSections) {
++    if (order.try_emplace(sec, priorities[prioIndex]).second)
++      ++prioIndex;
++  }
++}
++
+ // Builds section order for handling --symbol-ordering-file.
+ static DenseMap<const InputSectionBase *, int> buildSectionOrder() {
+   DenseMap<const InputSectionBase *, int> sectionOrder;
+@@ -1384,6 +1405,7 @@ static void sortSection(OutputSection *sec,
+ template <class ELFT> void Writer<ELFT>::sortInputSections() {
+   // Build the order once since it is expensive.
+   DenseMap<const InputSectionBase *, int> order = buildSectionOrder();
++  maybeShuffle(order);
+   for (BaseCommand *base : script->sectionCommands)
+     if (auto *sec = dyn_cast<OutputSection>(base))
+       sortSection(sec, order);
+diff --git a/lld/docs/ld.lld.1 b/lld/docs/ld.lld.1
+index 92d67b17e24e..058c8ddc9000 100644
+--- a/lld/docs/ld.lld.1
++++ b/lld/docs/ld.lld.1
+@@ -456,6 +456,8 @@ were concatenated in the order they appeared on the command line.
+ Set address of section.
+ .It Fl -shared , Fl -Bsharable
+ Build a shared object.
++.It Fl -shuffle-sections Ns = Ns Ar seed
++Shuffle input sections using the given seed. If 0, use a random seed.
+ .It Fl -soname Ns = Ns Ar value , Fl h Ar value
+ Set
+ .Dv DT_SONAME
+diff --git a/lld/test/ELF/shuffle-sections.s b/lld/test/ELF/shuffle-sections.s
+new file mode 100644
+index 000000000000..5250ea5e1a27
+--- /dev/null
++++ b/lld/test/ELF/shuffle-sections.s
+@@ -0,0 +1,47 @@
++# REQUIRES: x86
++# RUN: llvm-mc -filetype=obj -triple=x86_64 %s -o %t.o
++
++# RUN: ld.lld %t.o -o %t.out
++# RUN: llvm-readelf -x .text %t.out | FileCheck %s
++# CHECK: Hex dump of section '.text':
++# CHECK-NEXT: 01020304
++
++## --shuffle-sections= shuffles input sections.
++# RUN: ld.lld --shuffle-sections=1 %t.o -o %t1.out
++# RUN: llvm-readelf -x .text %t1.out | FileCheck %s --check-prefix=SHUFFLE1
++# SHUFFLE1: Hex dump of section '.text':
++# SHUFFLE1-NEXT: 01020403
++
++## Test that --shuffle-sections= can be used with --symbol-ordering-file
++# RUN: echo "foo" > %t_order.txt
++# RUN: echo "_start " >> %t_order.txt
++
++# RUN: ld.lld --symbol-ordering-file %t_order.txt --shuffle-sections=2 %t.o -o %t2.out
++# RUN: llvm-readelf -x .text %t2.out | FileCheck %s --check-prefix=SHUFFLE2
++# SHUFFLE2: Hex dump of section '.text':
++# SHUFFLE2-NEXT: 02cccccc 010403
++
++# RUN: ld.lld --symbol-ordering-file %t_order.txt --shuffle-sections=3 %t.o -o %t3.out
++# RUN: llvm-readelf -x .text %t3.out | FileCheck %s --check-prefix=SHUFFLE3
++# SHUFFLE3: Hex dump of section '.text':
++# SHUFFLE3-NEXT: 02cccccc 010304
++
++## .text has an alignment of 4.
++.global _start
++_start:
++  .byte 1
++
++.section .text.foo,"ax"
++.global foo
++foo:
++  .byte 2
++
++.section .text.bar,"ax"
++.global bar
++bar:
++  .byte 3
++
++.section .text.zed,"ax"
++.global zed
++zed:
++  .byte 4
