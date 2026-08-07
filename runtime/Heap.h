@@ -38,6 +38,14 @@ class CodeSource : public SizeHeap<FreelistHeap<BumpAlloc<CodeSize, MMapSource<C
 // ShuffleFreeGuard restores malloc()'s bypass for free(), routing anything
 // over MaxSize straight to the unshuffled heap underneath ShuffleHeap
 // instead of through ShuffleHeap's shuffle bookkeeping.
+//
+// The code heap hits this on essentially every free(): FunctionLocation's
+// allocations (a whole function's code, plus its relocation table if
+// adjacent) are practically always well over CodeShuffle=256 bytes, so
+// FunctionLocation::~FunctionLocation's getCodeHeap()->free() goes through
+// the same never-filled-bin swap as the data heap's realloc() did (gdb
+// confirmed: reqSz=4096, binIndex=9, ptr swapped to 0x0 at the
+// StrictSegHeap::free call, same as the -Rheap crash). Guard both heaps.
 template <size_t MaxSize, class ShuffledHeap, class UnshuffledHeap>
 class ShuffleFreeGuard : public ShuffledHeap {
 public:
@@ -51,7 +59,7 @@ public:
 };
 
 typedef ANSIWrapper<ShuffleFreeGuard<DataShuffle, ShuffleHeap<4096, DataShuffle, KingsleyHeap<DataSource, DataSource> >, KingsleyHeap<DataSource, DataSource> > > DataHeapType;
-typedef ANSIWrapper<ShuffleHeap<4096, CodeShuffle, KingsleyHeap<CodeSource, CodeSource> > > CodeHeapType;
+typedef ANSIWrapper<ShuffleFreeGuard<CodeShuffle, ShuffleHeap<4096, CodeShuffle, KingsleyHeap<CodeSource, CodeSource> >, KingsleyHeap<CodeSource, CodeSource> > > CodeHeapType;
     
 DataHeapType* getDataHeap();
 CodeHeapType* getCodeHeap();
