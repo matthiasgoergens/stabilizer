@@ -54,7 +54,35 @@ re-derived cross-family, but still *derived twice, measured never* — the
    never-filled slots) and the 600+ observed epochs saw no fault, but it
    is worth one assert in a debug build during the port proper.
 
-## Meta
+## Round 2 (later the same day): PR draft, pilot statistics, code-heap fix
+
+Three further passes at Matthias's request. Outcomes:
+
+- **PR draft (`deepseek-pr-draft-verdict.txt`): REFUTED on two claims;
+  half right.** (a) The 4-of-256 RNG steady-state sentence is indeed
+  unmeasured — already the gating condition for posting; unchanged.
+  (b) "Matching the original 2013 code" was called unattested — but the
+  attestation exists (`~/prog/stabilizer-period/NOTES.md`,
+  `libquantum-851-results/`); the refuter was not given that file. My
+  context-selection error, not a draft error. However, checking the
+  wording exposed a genuine imprecision: the port and the original were
+  each verified against *their own era's* uninstrumented build; no
+  cross-era output diff was done. Draft reworded to say exactly that.
+- **Pilot statistics (`deepseek-pilot-stats-verdict.txt`): REFUTED, and
+  the refutation under-counted.** DeepSeek correctly attacked the power
+  sketch (pooled vs within-seed σ; and more deeply, that a
+  one-binary-per-arm design suffers a *bias* replication cannot fix).
+  My independent recomputation (`recompute_pilot_stats.py`, run on the
+  raw CSV) found more: the pilot's "50.75% between-seed" was SSB/SST,
+  not a variance component — the correct decomposition is **30.1%
+  between-seed (σ_b ≈ 0.98% of mean), ANOVA p = 0.059**; and the
+  PADDED-arm within-seed anomaly traces to a run-order trend
+  (r = −0.39, p = 0.03) that the round-robin design pushes into
+  within-seed variance. SCOPING.md corrected; baseline agent re-briefed
+  (global interleaving, order covariate, method-of-moments components,
+  more seeds over more reps).
+- **Code-heap fix**: first pass returned an empty reply (tool artefact);
+  rerun with tighter context, verdict pending.
 
 The pattern matches the documented expectation: cross-model review is a
 good confirmer and a decent needler (it surfaced the first-four-zeros

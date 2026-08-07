@@ -272,12 +272,23 @@ localised defects. Run both prongs in parallel; neither blocks the other:
    A pilot of exactly this design has now run
    (`~/prog/stabilizer-baseline/`, 90 runs, libquantum, host clang/lld
    22.1.8, P-core pinned, ASLR on): within-build CV 0.71%; under 10
-   padding seeds total CV 1.77% with **50.75% of variance between
-   seeds** — the layout lottery is real and measurable here, and a
-   design that ignores it needs ~6× the runs to detect a 1% effect.
-   Pilot-scale caveats (3 reps/seed, one benchmark) and an unexplained
-   within-seed-CV anomaly are recorded in its NOTES.md rather than
-   smoothed over; the normality numbers at this n decide nothing yet.
+   padding seeds total CV 1.77%, with a between-seed variance component
+   of **30% (σ_between ≈ 1.0% of mean; ANOVA p = 0.059 at 3 reps/seed —
+   suggestive, not yet established)**. Corrected numbers: the pilot's
+   own analysis initially reported "50.75% between-seed", which was
+   SSB/SST — the seed factor's R², inflated by seed-mean estimation
+   noise — caught by a cross-model review of the statistics plus an
+   independent recomputation
+   (`scoping-notes/recompute_pilot_stats.py`). The right framing is
+   also not "6× more runs": a one-binary-per-arm comparison carries an
+   **irreducible layout bias of order 1% of mean** — the size of
+   effects people typically claim — and no amount of replication fixes
+   a bias. The pilot's within-seed-CV anomaly traced to a run-order
+   trend (r = −0.39, p = 0.03 in the PADDED arm only): round-robin
+   spreads a seed's reps across the session, so slow drift lands in
+   within-seed variance — the full experiment interleaves all arms
+   globally and models run order. Normality numbers at pilot n decide
+   nothing yet.
    Add a **DieHard arm**: `LD_PRELOAD`ing DieHard (maintained, same lab —
    and mechanically the same idea as Stabilizer's own ShuffleHeap) closes
    exactly the heap gap Collingbourne named and never built, for the cost of

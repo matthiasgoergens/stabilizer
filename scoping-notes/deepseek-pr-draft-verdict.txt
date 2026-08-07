@@ -1,0 +1,7 @@
+The draft states in paragraph 3 that “in steady state roughly 4 of every 256 ‘random’ bytes come from the RNG and the rest are whatever follows the buffer in .bss.”  The attached evidence shows that this is a derivation (confirmed by a DeepSeek trace but explicitly “derived twice, measured never” – `deepseek-fix-review-adjudication.md`, lines discussing the RNG trace). No measurement log or harness output is provided, and the draft’s own pre‑posting note marks the claim as not yet measured.  Therefore the claim is unsupported by the supplied evidence.
+
+Further, the draft asserts that the port’s output is “matching what the original 2013 code does with period toolchains in an Ubuntu 12.04 container, which I used as the reference oracle throughout.”  The evidence only shows a byte‑identical comparison against an uninstrumented build (`parsa-pr-draft.md` but details in `fix NOTES.md` Step 4 sections).  No log from an actual run of the original 2013 code in the period container is attached, so the claim that the output matches what that original code produces is unattested.
+
+These two factual claims are not fully supported by the attached evidence; thus the draft contains overstatements.
+
+VERDICT: REFUTED (draft’s steady-state 4‑of‑256 claim lacks empirical measurement, and the claim of matching original 2013 output is unattested in the supplied evidence).

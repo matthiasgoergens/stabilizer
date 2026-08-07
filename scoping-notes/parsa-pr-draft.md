@@ -16,9 +16,13 @@ timer to fire repeatedly) crash in all three randomisation modes, and
 this branch fixes the three underlying bugs. With them, tests/libquantum
 (input 851 2, ~29 s uninstrumented, ~170 re-randomisation epochs) runs to
 completion under -Rcode, -Rstack and -Rheap individually and combined,
-with output byte-identical to an uninstrumented build — matching what the
-original 2013 code does with period toolchains in an Ubuntu 12.04
-container, which I used as the reference oracle throughout.
+with output byte-identical to an uninstrumented build of the same source.
+As a reference oracle I ran the original 2013 code with period toolchains
+(LLVM 3.1/GCC 4.6) in an Ubuntu 12.04 container: it completes the same
+benchmark under all three modes at ~173 re-randomisation epochs with
+output identical to its own uninstrumented build — so the fixed port now
+matches the original's behaviour on this benchmark, each verified against
+its own era's compiler output.
 
 The first two crashes are one bug in modern DieHard worn twice.
 ShuffleHeap::malloc() bypasses its shuffle buffer for requests larger
