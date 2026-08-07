@@ -50,6 +50,11 @@ template <size_t MaxSize, class ShuffledHeap, class UnshuffledHeap>
 class ShuffleFreeGuard : public ShuffledHeap {
 public:
     inline void free(void* ptr) {
+        // ANSIWrapper already filters NULL on the public path; this guard
+        // keeps the class safe if it is ever composed without the wrapper.
+        if (ptr == nullptr) {
+            return;
+        }
         if (ShuffledHeap::getSize(ptr) > MaxSize) {
             UnshuffledHeap::free(ptr);
         } else {
