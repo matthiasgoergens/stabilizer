@@ -17,10 +17,17 @@ In order. Do not skip ahead to task 4.
 2. **Survey the 46 forks properly** for existing unbitrotting attempts, and the
    citation graph for academic successors. A five-minute pass is recorded below
    as a starting hint only — redo it properly; it is your job, not settled.
-3. **Measure the baseline**: how much of Stabilizer's benefit does
+3. **Get the original running in a period container** — LLVM 3.1, GCC 4.6.2,
+   Python 2.7 era userspace. Far cheaper than porting, and it gives you the
+   reference implementation that everything else is measured against. See
+   *Running the original against period software*. Read the kernel caveat there
+   before assuming a container is sufficient.
+4. **Measure the baseline**: how much of Stabilizer's benefit does
    `--randomize-section-padding` already deliver? See *The cheaper intermediate
-   deliverable*. Worth having regardless of what happens to the port.
-4. **Only if tasks 1–3 justify it**: a port plan, with each runtime risk
+   deliverable*. Worth having regardless of what happens to the port. Task 3
+   makes this a three-way comparison (nothing / LLD flag / real Stabilizer)
+   instead of a two-way one, which is much more informative.
+5. **Only if tasks 1–4 justify it**: a port plan, with each runtime risk
    assessed individually.
 
 ## Why anyone cares
@@ -190,6 +197,102 @@ Do not estimate this as "update the API calls".
    what was *not* controlled.
 3. Only then, if warranted, a port plan with the runtime risks assessed
    individually.
+
+## Running the original against period software
+
+Before porting anything, try to make the original *work* in a container with
+period-correct userspace: LLVM 3.1 (released May 2012), GCC 4.6.2, Python 2.7.
+Ubuntu 12.04 LTS or Debian wheezy are the natural base images and are still
+pullable. Both podman and docker are available on this machine; podman rootless
+is the default choice.
+
+Why this is worth doing first:
+
+- It is far cheaper than a port, and it either produces a **working reference
+  implementation** or tells you early that the design cannot run on a modern
+  machine at all — which is itself the answer to the scoping question.
+- It turns task 4 from a two-way comparison (nothing versus LLD flag) into a
+  three-way one (nothing / LLD flag / real Stabilizer). Without a working
+  Stabilizer you can only characterise what the LLD flag does, not what
+  fraction of the full technique it captures — which is the actual question.
+- It lets you reproduce the paper's own numbers as a correctness check on your
+  harness before you trust it on anything new.
+- If a port does happen, this is the oracle you differential-test against.
+
+**The caveat that decides whether this works: a container gives you a period
+*userspace*, not a period *kernel*.** Stabilizer's runtime relocates live code
+and stack frames using `mmap`/`mprotect` and trap-based patching (`Trap.h`,
+`Jump.h`, `Function.cpp`), and that machinery interacts with kernel-side and
+CPU-side policy that a container does not roll back: W^X enforcement, CET/IBT
+shadow stacks and `endbr64` requirements on recent CPUs, `vm.mmap_min_addr`,
+ASLR behaviour, and any newer `seccomp`/hardening defaults. Old GCC and old
+LLVM you get for free; a 2012 kernel you do not.
+
+So: if it fails, **diagnose whether the blocker is userspace or kernel/CPU
+before concluding anything**. A userspace failure is a build problem. A
+kernel-or-CPU failure is a finding — it means the original technique needs
+rework to run on 2026 hardware regardless of LLVM version, and that reshapes
+the port estimate substantially. If you land there, a VM with a period kernel
+is the next rung, and worth it only to establish the reference numbers.
+
+Record what you tried and what the failure mode was either way. "It did not
+build" is not a useful note; "it built, and died in `Function::relocate` with
+SIGSEGV on an `endbr64`-guarded target" is.
+
+## Mine the original benchmarks and experimental design — they are in this repo
+
+Do not invent an evaluation from scratch. The original work came with a full
+experimental apparatus, and most of it is sitting in this checkout.
+
+**`tests/` vendors three SPEC CPU2006 benchmarks in full, with their input
+sets**: `bzip2` (plus `input.combined`), `libquantum`, and `perlbench` (with
+`checkspam.pl`, `diffmail`, `perfect`, `scrabbl`, `splitmail` inputs and a
+bundled Perl library tree). Also `HelloWorld` and `Context` — the latter has a
+`stub.asm` and is presumably a runtime context-switch test. **This matters
+practically**: SPEC CPU2006 is licensed and you should not assume access, but
+these three give a licence-free partial replication out of the box.
+
+**`run.py` encodes the paper's factorial design.** The configs are:
+
+    code, code.stack, code.heap.stack, stack, heap.stack, heap, link
+
+That is the ablation over *which* layout components get randomised
+(`szc -Rcode -Rstack -Rheap` in any combination), crossed with optimisation
+level (`O0`/`O1` via `szclo.cfg`, `O2`/`O3` via `szchi.cfg`, mapped to SPEC
+base/peak tuning) and input size (test/train/ref).
+
+**The `link` config is the one to look at hardest.** It is special-cased in
+`run.py` to rebuild the binary on every iteration and take a single run each,
+i.e. it is *static, per-build* layout randomisation — the direct conceptual
+analogue of `lld --randomize-section-padding`. The other configs are
+Stabilizer's *runtime re-randomisation*. **So the comparison this brief asks
+you to make already exists as a contrast in the original design**: `link`
+versus `code`/`stack`/`heap`. Reuse that structure rather than inventing one,
+and you also get to check your results against the paper's.
+
+**`process.py` already does the statistics**, including the normality testing
+that the entire methodological argument rests on: `scipy.stats.shapiro`
+(Shapiro-Wilk) and `anderson`, behind the `-norm` flag, plus `-trim` and
+`-all`. It is Python 2 and parses SPEC `.rsf` files, so it needs rewriting, but
+the analysis logic is the specification.
+
+**A sharp, falsifiable prediction to test.** Stabilizer's normality claim comes
+specifically from re-randomising *within* a run. The LLD flag randomises once
+per build. So the prediction is that per-build LLD-padding samples need **not**
+be Gaussian, while Stabilizer's within-run samples should be — and Shapiro-Wilk
+on both, using the original `-norm` machinery, decides it. If LLD-flag samples
+turn out normal anyway, much of the argument for the port collapses and you
+have a clean, cheap finding. If they are not, you have quantified exactly what
+the port would buy. Either way this is a better experiment than "is Stabilizer
+faster", and it is the one most likely to settle the question.
+
+**The paper's headline result is a replication target worth having**: that
+`-O2` significantly beats `-O1`, while *"the performance impact of `-O3` over
+`-O2` optimizations is indistinguishable from random noise"*. Re-running that
+against a 2026 LLVM would be a contribution in its own right, is a strong
+motivating example for any write-up, and doubles as an end-to-end check that a
+revived Stabilizer actually works. See also fgiesen's write-up, linked from the
+README.
 
 ## House rules for this work
 
