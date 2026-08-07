@@ -2,10 +2,12 @@
 
 Mechanics: `gh pr create --repo parsa/stabilizer --head matthiasgoergens:llvm21-fixes`
 (same fork network; fallback if cross-fork base refused: issue with branch link).
-Hold posting until the stress agent's RNG harness has MEASURED the
-steady-state claim in paragraph 3 (currently: derived + DeepSeek-stepped,
-not yet measured). If the first-four-zeros micro-fix commit lands first,
-push it to llvm21-fixes so it rides along.
+GATE MET 2026-08-07: the RNG steady-state claim is now MEASURED (stress
+harness, 12/12 checks confirmed — `~/prog/stabilizer-stress/NOTES.md`
+Task 3). The branch now also carries the first-four-zeros micro-fix
+(24df701) and a defence-in-depth null guard (6b263a4), both verified
+in-container; the residuals paragraph below reflects that. Ready to post
+on Matthias's word.
 
 Title: Fix three runtime crashes under sustained re-randomisation (LLVM 21)
 
@@ -56,9 +58,15 @@ stack-randomisation quality in the original tool was substantially
 degraded by this bug — relevant to anyone comparing against the paper's
 stack-ablation numbers.
 
-Each commit message carries the gdb evidence. Known residuals I'd be
-happy to follow up on: the first four getRandomByte() calls still return
-zero before the first refill (also true upstream), and gdb
-breakpoints/strace interact badly with the int3 trap protocol (both
-write 0xCC) — worth a README note. I can also share the verification
-setup (the period-container oracle and run logs) if useful.
+Each commit message carries the gdb evidence. Two smaller commits ride
+along: getRandomByte() also returned four zero bytes before its first
+refill (initialising the cursor to sizeof(int) makes the first call
+refill — confirmed with an instrumented harness across all three
+variants of the function), and a defence-in-depth null guard on the new
+free path (unreachable today — ANSIWrapper filters NULL — but it keeps
+the layer safe if composed differently). One caveat worth a README note
+if you take these: gdb breakpoints and strace both interact badly with
+the int3 trap protocol (a breakpoint on an instrumented function and the
+runtime's own trap are both 0xCC writes, and their restore bookkeeping
+collides). I can also share the verification setup (the period-container
+oracle, the fuzzing/property-test harnesses, and run logs) if useful.
