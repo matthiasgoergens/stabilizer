@@ -2,12 +2,12 @@
 
 Status: adversarially reviewed 2026-08-07 and revised in response — the
 review (in-family refutation agent) found the first draft overclaimed its
-two load-bearing inferences, and this version corrects them. Two
-verification experiments are running as a consequence (original on a
-long-running benchmark with actual re-randomisation epochs; parsa rebuilt
-with 2013-pinned Heap-Layers), and a cross-model codex pass is queued
-behind a quota reset (2026-08-08 evening). Treat the recommendation as
-conditional until those land.
+two load-bearing inferences, and this version corrects them. The first
+verification experiment it demanded has since landed and passed (original
+survives ~173 re-randomisation epochs on a real benchmark, all modes, §2);
+the second (parsa rebuilt with 2013-pinned Heap-Layers) is running, and a
+cross-model pass is queued. The recommendation remains conditional on the
+task-4 baseline either way.
 
 Evidence base: `scoping-notes/` in this repo — `runtime-analysis.md` (source
 read of the runtime and pass), `fork-survey.md` (51 repos, all 163 branches
@@ -27,11 +27,12 @@ the nearest partial forms are DieHard's per-malloc shuffling (heap only,
 maintained) and security-world re-randomisers (unusable research
 artifacts); LLVM never rejected such a facility — nobody ever proposed one.
 Both empirical checks were encouraging but bounded: the **original builds
-and runs on 2026 hardware** (period container — though its only *real*
-benchmark run finished before any re-randomisation epoch fired, so epochs
-are so far proven only on a trivial stress program; a longer run is in
-flight), and **`parsa/stabilizer` builds clean against LLVM 21 with PIE
-working**, then crashes at three sites under sustained execution — a
+and runs on 2026 hardware, and survives sustained re-randomisation on a
+real benchmark** (period container: `libquantum 851 2`, ~173 epochs per
+run, each mode separately and all combined, output byte-identical to the
+uninstrumented oracle), and **`parsa/stabilizer` builds clean against
+LLVM 21 with PIE working**, then crashes at three sites under sustained
+execution — a
 lower bound from one benchmark, with the crash sites located but not yet
 root-caused, a possible Heap-Layers-version confound not yet excluded, and
 at least one further known bug class (TLS, fixed in the magras lineage,
@@ -120,15 +121,19 @@ cluster), all 163 branches compared, diffs read for everything ahead.
   (`stabilizer_realloc`/`stabilizer_free`) are byte-identical to
   upstream's — verified by direct diff — so the defect is in the port's
   other changes, its dependencies, or a latent original bug newly exposed.
-  The period-container run of the original provides a genuine shared
-  oracle only for the `realloc` path: its libquantum run (at input 128)
-  completed correctly, but **finished before any re-randomisation epoch
-  fired** (zero "Re-randomization" lines in that log, versus twelve in the
-  stress-test log), so the original has not yet been shown to survive
-  epochs on a real benchmark — a longer run is in flight to establish
-  exactly that. "Tested with LLVM 21" is true of the build and a one-shot
-  trivial program; unproven for sustained measurement use, where every
-  mode currently fails.
+  The oracle gap the adversarial review exposed (the original's first
+  libquantum run, at input 128, finished before any epoch fired) has since
+  been closed: on `libquantum 851 2` the **original survives ~173 epochs
+  per run in every mode**, separately and combined, output identical to
+  uninstrumented (`~/prog/stabilizer-period/NOTES.md`,
+  `libquantum-851-results/`). Every parsa crash is therefore a regression
+  relative to a demonstrably working design on the same kernel — in the
+  port's own changes or its unpinned dependencies. One design nuance
+  recorded there: `-Rheap` is not epoch-gated at all (ShuffleHeap
+  randomises at every `malloc`), so its correctness evidence is the clean
+  output under sustained shuffled allocation, not a timer count. "Tested
+  with LLVM 21" is true of the build and a one-shot trivial program;
+  currently false for sustained measurement use, where every mode fails.
 - **`Dead2/stabilizer`** (Hans Kristian Rosbach; *detached* repo, invisible
   to fork-graph walks): LLVM 12, CMake+Docker+CI, multi-contributor, stale
   since 2023-08. Its README is the most honest status report in the whole
@@ -187,11 +192,17 @@ clang-3.1 package ever existed in that pool; Heap-Layers/DieHard pinned to
 otherwise fetch 2026 HEAD), and Stabilizer built clean and **ran correctly
 under full `-Rcode -Rheap -Rstack`** on this host (Arch, kernel 7.1.5,
 i9-13900K — a CET-capable CPU): HelloWorld, a 3 s re-randomisation stress
-test (6 epochs/run, 3 runs), and `tests/libquantum` with correct output —
-though note the libquantum run (input 128) **completed before the first
-re-randomisation epoch**, so real-benchmark epoch survival is currently
-attested only by the stress program; a `libquantum 851 2` run (~58
-epochs) in all modes is in flight to close that gap.
+test (6 epochs/run, 3 runs), and `tests/libquantum`. The adversarial
+review caught that the first libquantum run (input 128) completed before
+any epoch fired; the follow-up closed the gap decisively: **`libquantum
+851 2` under `-Rcode`, `-Rstack`, `-Rheap` and all three combined — ~173
+epochs per run — exit 0 every time, output byte-identical to the
+uninstrumented oracle**. One number to treat with care: the instrumented
+runs took ~85-90 s against the oracle's 36 s. That is NOT a valid
+overhead measurement (debug-instrumented builds, untuned config, one
+benchmark) and must not be quoted against the paper's "<7% median" —
+but it flags overhead measurement as a first-class task for
+`BASELINE.md`.
 `readelf`/`objdump` confirm the binaries carry no CET markings and no
 `endbr64`, so the CPU's CET support is inert for them by the opt-in ABI —
 including the `push`+`ret` trampoline a shadow stack exists to catch.
@@ -325,8 +336,7 @@ copies was not triaged; Semantic Scholar was rate-limited throughout
 (OpenAlex coverage ≈ 89% of citations); pre-2020 llvm-dev mailing lists were
 not searched; Kristof Beyls's talks are cited second-hand; the
 period-container result is host-specific (an MDWE-hardened host could still
-block RWX pages) and its real-benchmark run included zero re-randomisation
-epochs (being closed now); the parsa verification built against unpinned
+block RWX pages); the parsa verification built against unpinned
 2026-HEAD Heap-Layers/DieHard, a version-skew confound on the `-Rheap`
 crash (pinned rebuild running); the parsa binaries' CET/property-note
 status was not recorded; and neither experiment tested threaded programs,
