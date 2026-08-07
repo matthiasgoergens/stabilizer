@@ -45,7 +45,7 @@ static inline uint8_t getRandomByte() {
     
     if(_randCount == sizeof(int)) {
         _bigRand = _rng.next();
-        _randCount = sizeof(int);
+        _randCount = 0;
     }
     
     uint8_t r = _rands[_randCount];
