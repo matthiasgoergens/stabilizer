@@ -1,0 +1,7 @@
+After a thorough review of SCOPING.md and all attached evidence notes, I find no load‑bearing internal contradiction, no misconstructed decision gate, and no misreading of the code that would refute the conditional‑resurrection recommendation (d).  
+
+The premises (a)–(c) are accurately supported by the scoping notes, and the proposed gate—baseline experiment + parallel port‑probe—is a rational, evidence‑driven way to decide whether to commit to a full resurrection.  The evidence does not show that the cheap baseline is already known to be sufficient or insufficient; the probe correctly acknowledges the port’s current breakage and treats its tractability as an open question.  There is no internal conflict between SCOPING.md and the primary notes (e.g., the period‑container result, the parsa crash sites, the fork‑survey findings) that undermines the logic leading to (d).  
+
+Because I cannot find a substantive refutation after actively searching for one, I must conclude that the claim stands.  
+
+VERDICT: CONFIRMED  (No internal contradiction, misconstruction, or evidence misreading was found that would make the conditional‑resurrection recommendation the wrong call.)

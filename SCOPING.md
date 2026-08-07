@@ -5,9 +5,11 @@ review (in-family refutation agent) found the first draft overclaimed its
 two load-bearing inferences, and this version corrects them. The first
 verification experiment it demanded has since landed and passed (original
 survives ~173 re-randomisation epochs on a real benchmark, all modes, §2);
-the second (parsa rebuilt with 2013-pinned Heap-Layers) is running, and a
-cross-model pass is queued. The recommendation remains conditional on the
-task-4 baseline either way.
+the second (parsa rebuilt with 2013-pinned Heap-Layers) is running. A
+cross-model pass (DeepSeek, reasoning model) returned CONFIRMED against
+this revision (`scoping-notes/deepseek-verdict.txt`); a codex pass is
+queued behind quota as a second family. The recommendation remains
+conditional on the task-4 baseline either way.
 
 Evidence base: `scoping-notes/` in this repo — `runtime-analysis.md` (source
 read of the runtime and pass), `fork-survey.md` (51 repos, all 163 branches
