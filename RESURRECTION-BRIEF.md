@@ -23,10 +23,12 @@ In order. Do not skip ahead to task 4.
    *Running the original against period software*. Read the kernel caveat there
    before assuming a container is sufficient.
 4. **Measure the baseline**: how much of Stabilizer's benefit does
-   `--randomize-section-padding` already deliver? See *The cheaper intermediate
-   deliverable*. Worth having regardless of what happens to the port. Task 3
-   makes this a three-way comparison (nothing / LLD flag / real Stabilizer)
-   instead of a two-way one, which is much more informative.
+   `--randomize-section-padding` already deliver, **on code built by today's
+   clang and gcc**? See *The cheaper intermediate deliverable*. Worth having
+   regardless of what happens to the port. Note task 3 does not simply extend
+   this into a clean three-way comparison — period Stabilizer measures 2012
+   compiler output, so the eras are confounded; read the caveat in task 3
+   before designing the contrast.
 5. **Only if tasks 1–4 justify it**: a port plan, with each runtime risk
    assessed individually.
 
@@ -209,15 +211,42 @@ is the default choice.
 Why this is worth doing first:
 
 - It is far cheaper than a port, and it either produces a **working reference
-  implementation** or tells you early that the design cannot run on a modern
-  machine at all — which is itself the answer to the scoping question.
-- It turns task 4 from a two-way comparison (nothing versus LLD flag) into a
-  three-way one (nothing / LLD flag / real Stabilizer). Without a working
-  Stabilizer you can only characterise what the LLD flag does, not what
-  fraction of the full technique it captures — which is the actual question.
+  implementation of the technique** or tells you early that the design cannot
+  run on a modern machine at all — which is itself the answer to the scoping
+  question.
 - It lets you reproduce the paper's own numbers as a correctness check on your
   harness before you trust it on anything new.
 - If a port does happen, this is the oracle you differential-test against.
+
+**Be clear about what it does NOT buy, because it is easy to oversell.**
+Stabilizer compiles the program under test with *its own* toolchain, so
+anything you measure in a period container is **2012 compiler output**. That
+limits it in a way that goes to the heart of the project:
+
+- Replicating "`-O3` over `-O2` is indistinguishable from noise" in the
+  container replicates a fact about **LLVM 3.1**. It is a calibration of your
+  harness and a historical check, not a result anyone benchmarking today needs.
+  *The interesting modern version of that question — is `-O3` still noise on
+  LLVM 22? — cannot be answered without a tool that works on modern output.*
+- People want to know whether their benchmark of a change to code built with
+  **today's** clang or gcc is trustworthy. Modern output differs in ways that
+  bear directly on layout sensitivity: different inlining and vectorisation,
+  LTO, PGO, and layout optimisers such as BOLT and Propeller. A 2012 binary is
+  not a proxy for that.
+- **This is a confound in the three-way comparison, so do not run it naively.**
+  "LLD flag on clang 22 output" versus "Stabilizer on LLVM 3.1 output" compares
+  two techniques applied to *different programs*, and any difference is
+  uninterpretable. If you want a clean contrast, either hold the compiler fixed
+  within each comparison (LLD-flag-versus-nothing on modern output; Stabilizer's
+  own `link`-versus-`code`/`stack`/`heap` contrast on period output, which the
+  original harness already gives you) and compare the *ratios* rather than raw
+  numbers, or state plainly that the cross-era comparison is qualitative.
+
+Which cuts both ways for the scoping decision, and you should say so explicitly
+in `SCOPING.md`: the LLD flag's decisive practical advantage is that it works
+on modern toolchains **today**, whatever its statistical limitations; and the
+strongest argument *for* the port is precisely that no period-container result
+can speak to modern compiler output.
 
 **The caveat that decides whether this works: a container gives you a period
 *userspace*, not a period *kernel*.** Stabilizer's runtime relocates live code
@@ -286,13 +315,21 @@ have a clean, cheap finding. If they are not, you have quantified exactly what
 the port would buy. Either way this is a better experiment than "is Stabilizer
 faster", and it is the one most likely to settle the question.
 
-**The paper's headline result is a replication target worth having**: that
-`-O2` significantly beats `-O1`, while *"the performance impact of `-O3` over
-`-O2` optimizations is indistinguishable from random noise"*. Re-running that
-against a 2026 LLVM would be a contribution in its own right, is a strong
-motivating example for any write-up, and doubles as an end-to-end check that a
-revived Stabilizer actually works. See also fgiesen's write-up, linked from the
-README.
+**The paper's headline result is the obvious replication target**: that `-O2`
+significantly beats `-O1`, while *"the performance impact of `-O3` over `-O2`
+optimizations is indistinguishable from random noise"*. See also fgiesen's
+write-up, linked from the README.
+
+Distinguish two versions of that, because they are worth very different things.
+Reproducing it **on LLVM 3.1 in the period container** validates your harness
+against a published number — useful, but it is a fact about a 2012 compiler.
+Asking it **of a 2026 LLVM** is the result people would actually act on, and it
+is a genuine contribution: fourteen years of optimisation work later, is `-O3`
+still indistinguishable from noise? That version requires a tool that works on
+modern compiler output, which is exactly the capability under scoping here. If
+the answer to task 1 is "the LLD flag is enough", then run it with the LLD flag
+and publish that; if it is not enough, this experiment is the concrete thing
+the port would unlock, and should be named as such in the justification.
 
 ## House rules for this work
 
