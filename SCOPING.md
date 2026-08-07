@@ -142,6 +142,17 @@ determined by what is above:
    normality machinery as specification). It answers the question the LLD
    flag's own authors never asked: how much of the layout variance does
    per-build padding capture, and are its samples Gaussian?
+   Add a **DieHard arm**: `LD_PRELOAD`ing DieHard (maintained, same lab —
+   and mechanically the same idea as Stabilizer's own ShuffleHeap) closes
+   exactly the heap gap Collingbourne named and never built, for the cost of
+   one environment variable and no rebuild. It mirrors the paper's `heap`
+   config, keeping results comparable to the published ablation. DieHard is
+   a *component* here, not a candidate foundation: it has no pass and no
+   code/stack machinery, so it cannot carry the axes that have no
+   substitute. Caveat to state in `BASELINE.md`: its ~2× heap expansion and
+   allocation overhead mean that arm measures layout variance *under
+   DieHard*, not under glibc malloc — fine for A/B, but a different
+   allocator regime.
 2. **If `parsa/stabilizer` builds and survives re-randomisation** on LLVM 21,
    the port question mostly disappears: the work becomes validate, fix
    residuals (threads? unwinding?), and run the three-way comparison with it.
