@@ -166,6 +166,43 @@ determined by what is above:
    trivially, and treat the normality replication as the first experiment any
    revived Stabilizer runs, because nobody has ever checked it.
 
+## Stretch goal: upstreaming into LLVM proper
+
+The archaeology says the door is open but narrow. Nobody has ever proposed a
+Stabilizer-like facility in-tree, so it has never been rejected; the padding
+flag's author is actively interested in measurement bias (the RFC,
+`run_benchmark.py`, Google-internal `-falign-functions=32`), and Berger
+himself surfaced in the thread. A realistic ladder, easiest first:
+
+1. **The `LD_PRELOAD` heap-jitter library pcc floated and never built**
+   (RFC post 9). Small, explicitly wanted, and our DieHard-arm baseline
+   numbers would be the motivating evidence.
+2. **Generalise `lld/utils/run_benchmark.py`** beyond benchmarking lld
+   itself — pcc wished for exactly this in the same post.
+3. **The full runtime facility**, only with `BASELINE.md`-grade evidence
+   that per-build padding is insufficient. Expect the in-tree objections to
+   be CI cost (what shelved Kristof Beyls's basic-block perturbation at Arm)
+   and RWX/CET hygiene (the runtime needs writable+executable pages and
+   `ret`-based dispatch, which fights every hardening trend), not novelty.
+
+## Languages, and the Rust question
+
+Everything substantive is C++: the pass (947 lines, LLVM C++ API), the
+runtime (~1,100 lines, Heap Layers templates, machine-code-emitting structs
+in `Jump.h`/`Trap.h`); `szc`/`run.py`/`process.py` are Python 2 (rewrite,
+trivially). A Rust port splits cleanly:
+
+- **Pass: stays C++.** Rust LLVM bindings wrap the narrower C API, lag
+  releases, and would foreclose upstreaming. Not worth it.
+- **Runtime: a plausible later candidate.** Small, standalone, C-ABI
+  boundary (trivial from Rust). The core operations (live code patching,
+  signal-context rewriting, allocation in handlers) stay `unsafe` either
+  way, so safety gains land mostly in the bookkeeping — but Rust's
+  concurrency discipline is a real asset for the thread-safety redesign,
+  which is the genuinely new engineering a revival needs. Tension to
+  resolve first: a Rust runtime conflicts with the LLVM-proper stretch goal
+  (compiler-rt is C/C++). Decide the North Star before rewriting.
+
 ## What was not controlled / coverage gaps
 
 Each scoping note carries its own explicit coverage statement; the material
