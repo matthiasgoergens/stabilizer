@@ -1,0 +1,31 @@
+### PR1 — POST-WITH-EDITS
+
+The mechanism, modes fixed, guard/null-check description, and test result are accurate. Make these minimal edits:
+
+- Replace the opening with: “I’ve been exercising the LLVM 21 port on `tests/libquantum` and hit crashes in the heap and code modes.”  
+  The current “under sustained re-randomisation” is false for `-Rheap`, which fails before the first timer tick. Delete the PIE/CodeWindow sentence; it is unnecessary causal exclusion.
+
+- Change “The data heap hits it on libquantum’s first large realloc” to “The data heap hits it while freeing the 512-byte old block during libquantum’s first large realloc”.
+
+- Replace “not a DieHard bug” with “It is a missing free-side bypass in the port’s modern `ShuffleHeap` composition.” The present wording is too categorical.
+
+- Make the final test sentence explicitly depend on the separate stack PR: “With this PR and the separate stack PR, `tests/libquantum` (`851 2`) runs to completion under `-Rheap`, `-Rcode`, and all modes combined, output byte-identical to an uninstrumented build.” Delete the property/fuzz clause: it is extra for a maintainer-facing description and exceeds the promised one test line.
+
+After that, it is appropriately concise and author-led.
+
+### PR2 — POST-WITH-EDITS
+
+The inherited-from-ccurtsinger claim is accurate; the upstream README explicitly says the project is no longer actively maintained. [ccurtsinger/stabilizer README](https://github.com/ccurtsinger/stabilizer) The harness statement and `-Rstack` verification wording are also accurate.
+
+Make these minimal edits:
+
+- Replace the OOB explanation with: “After the first four calls, each refill leaves the cursor at 4, so it reads past the 4-byte buffer (with a `uint8_t` wrap every 256 calls) until it reaches unmapped storage and faults.”  
+  “Never re-enters” is literally false: the counter wraps through indices 0–3.
+
+- Replace “getRandomByte()’s only callers are the stack pads, which is why only `-Rstack` is affected” with: “Its only callers are the two stack-pad update sites; the observed crash is in `-Rstack`.” The former overstates causality, since one call site is exercised during code relocation too.
+
+- Tighten the provenance sentence to: “The cause is in `getRandomByte()` (`runtime/Util.h`) and is unchanged from the original `ccurtsinger/stabilizer`, not introduced by the port; that repository is no longer actively maintained, so I’m sending the fix here.”
+
+- Delete the final “Worth noting…” sentence. It is directionally true, but unnecessary and slightly speculative for this PR.
+
+With those edits, it is tight, humble, and appropriate for a solo maintainer.
