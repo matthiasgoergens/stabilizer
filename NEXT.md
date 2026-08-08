@@ -1,111 +1,74 @@
-# NEXT — Stabilizer resurrection scoping (state as of 2026-08-07 evening)
+# NEXT — Stabilizer resurrection (state as of 2026-08-09)
 
-Goal: RESURRECTION-BRIEF.md tasks 1–4. Task 1–3 done; task 4 piloted; task 5
-(port) two-thirds probed. **Nothing has been pushed anywhere — all work is
-local commits only; pushing needs Matthias's approval.**
+**Bash outage (2026-08-09, ~1h) — RESOLVED, root-caused.** Symptom: every
+command (even `true`) returned exit 1, no output = `fork()` failing. Cause:
+memory exhaustion under peak parallelism (several multi-GB agent processes
++ podman LLVM/Rust builds + baseline batch + AFL at once). Evidence: ~21s
+cumulative *full* PSI memory stall, 51 GiB swap used, `overcommit_memory=0`
+(heuristic overcommit denies fork ENOMEM under pressure). NOT a pid cap
+(cgroup 2914/153301), no visible OOM-kill (dmesg/journal root-restricted).
+**Mitigation: cap concurrent heavy agents/containers (~2–3, not 5+).**
 
-## Done, with evidence
+## Live on parsa/stabilizer (both verified + two-family reviewed)
+- **#1** getRandomByte OOB → fixes `-Rstack` (branch `llvm21-rng-fix`).
+- **#2** ShuffleFreeGuard → fixes `-Rheap` + deterministic `-Rcode` sweep
+  crash (branch `llvm21-heap-fixes`).
+- Our fork `matthiasgoergens/stabilizer` carries these branches +
+  `llvm21-fixes` (all 5) + `llvm21-timer-fix` (partial teardown).
+- Scoping repo `~/prog/stabilizer` master pushed through `b97ecf0`.
 
-- **SCOPING.md** (repo root): conditional-yes recommendation, adversarially
-  reviewed and corrected. History: draft 1b626e5 → review applied c72eeb4 →
-  oracle cd2eab1 → heap fix 50f05c2 → stack fix + pilot cd2fc63. In-family
-  refutation agent found 2 blocking overclaims (both re-verified by me
-  before applying — see commit c72eeb4's message); DeepSeek cross-model
-  pass returned CONFIRMED (scoping-notes/deepseek-verdict.txt).
-- **Research notes** in scoping-notes/ (each with its own coverage
-  statement): fork-survey.md (51 repos/163 branches; standouts
-  parsa/stabilizer, detached Dead2/stabilizer), citation-graph.md (104/117
-  citers, no successor/replication found by abstract triage), llvm-rfc.md
-  (nothing rejected — never proposed; pcc's in-tree run_benchmark.py is
-  the native K-seed harness), alternatives.md (no within-run rerandomiser
-  exists anywhere; DieHard maintained), runtime-analysis.md (mechanism +
-  2026 viability + RNG addendum).
-- **Original works on 2026 hardware**: period container
-  (~/prog/stabilizer-period/, NOTES.md + libquantum-851-results/):
-  libquantum 851 2, ~173 epochs/run, modes separate and combined, exit 0,
-  output byte-identical to uninstrumented oracle.
-- **parsa/stabilizer port probe** (~/prog/stabilizer-parsa-fix/stabilizer,
-  local clone of 2bffc191c9): builds zero-patch on LLVM 21.1.8, PIE works.
-  - `-Rheap` crash FIXED, commit f9ed534: modern DieHard ShuffleHeap
-    malloc bypasses shuffle buffer >MaxSize, free does not → null from
-    never-filled bin. gdb-confirmed (gdb-heap-crash-02.log). Verified
-    ~150 epochs ×4 runs, byte-identical output.
-  - `-Rstack` crash FIXED, commit 29afeef: getRandomByte() cursor reset
-    to sizeof(int) not 0 — bug byte-identical in 2013 original
-    (runtime/Util.h:48). Crashed only because modern .bss is 32× larger
-    and the buffer sat at its exact end. Verified ~170 epochs ×2 runs.
-  - 2013-pinned Heap-Layers does NOT compile against the port
-    (build-04-pinned-scratch.log) — version-skew confound closed:
-    adaptation was forced, carried exactly one bug.
-- **Research finding**: the original's stack-pad randomness was largely
-  inert as shipped (getRandomByte sole consumer = stack pads). Derivation
-  in runtime-analysis.md addendum. Externally quotable only after harness
-  confirmation (see Unverified).
-- **Baseline pilot ran** (~/prog/stabilizer-baseline/, own git repo,
-  results.csv, NOTES.md): libquantum, clang/lld 22.1.8 -O2, P-core
-  pinned, ASLR on. Within-build CV 0.71%; 10 padding seeds → CV 1.77%
-  with 50.75% of variance between-seed. Sizing: ~6× more runs needed for
-  1% effect if layout ignored. 90/90 runs output-correct.
-- FOLLOW-UPS.md: phantom-speedup archaeology (Matthias's idea, recorded).
+## Bug #4 (teardown race) — fix implemented, NOT yet verified/posted
+- Symptom: SIGALRM/SIGTRAP after `stabilizer_main` returns runs onTimer/
+  onTrap against torn-down code → fault. Partial fix (onTimer only) was
+  `b274f86`; both codex+deepseek found onTrap is an unguarded sibling.
+- **Complete protocol committed** at `~/prog/stabilizer-teardown-fix/
+  stabilizer`, branch `teardown-protocol`, commit `49ffde3` (on b274f86):
+  `Function::untrap()` (restores forwarding jump or saved header) called
+  over all functions in wrapper main after stabilizer_main returns;
+  `sigprocmask(SIG_BLOCK, SIGALRM)`; `sigemptyset(&sa.sa_mask)` in
+  setHandler. Residual: 1-instruction window before the block (harmless,
+  documented).
+- Verified so far: 2 clean post-fix runs of a deterministic teardown probe
+  (atexit calls an instrumented fn; both "never-relocated/trapped" and
+  "already-forwarded" cases), stdout matched libquantum(851,2). Logs in
+  `~/prog/stabilizer-teardown-fix/.../teardown-notes/run-03*`.
+- ⛔ STILL NEEDED before PR3: pre-fix baseline fault-rate on b274f86 (for
+  contrast); ≥20 repeats of the teardown probe; ≥20 libquantum
+  `-Rcode -Rheap` non-regression (must stay 0 aborts like b274f86's 20/20);
+  oracle byte-diff; commit `teardown_probe.cpp` + the `shor.c` probe call
+  site + NOTES.md (currently uncommitted); then codex+deepseek on the diff;
+  then create branch from 2bffc191c9 and post PR3 (text draft:
+  `~/prog/stabilizer/scoping-notes/pr3-timer-FINAL.md`, will need updating
+  to describe the complete protocol, not just the timer).
 
-## In flight
+## Bug #5 (NEW, out of scope, unfixed) — record, don't chase yet
+Text-relocation-patching corruption on tiny / C++-static-object-heavy
+`-Rcode` binaries: a wrong static PC32 relocation baked in at link time
+(hypothesis: GOT/PLT relaxation desyncing with `--emit-relocs`). Found by
+the teardown agent's synthetic minimal test. Evidence (readelf/nm/objdump)
+archived at `~/prog/stabilizer-teardown-fix/stabilizer/teardown-notes/
+synthetic-test-tripped-separate-bug/`. Real bug; a future PR candidate.
 
-- Nothing. All dispatched work has landed. (-Rcode crash: FIXED, commit
-  19137a3 — same ShuffleHeap asymmetry on the code heap, as suspected.
-  All three modes combined now run ~170 epochs ×3, byte-identical.
-  Port-tractability probe: CLOSED, affirmative. Side-finding: gdb
-  breakpoints corrupt the int3 trap protocol — debugger incompatibility
-  to document alongside strace.)
+## Done this session (committed + pushed unless noted)
+- SCOPING.md: conditional/deflationary recommendation, adversarially
+  reviewed (codex WEAKENED→addressed, 2× deepseek), pre-registered gate.
+- BASELINE.md (`~/prog/stabilizer-baseline`): load-robust design validated
+  (63% load CV → within-pair ratio r~0); cheap route ~0% overhead,
+  Stabilizer ~2–2.7×; between-seed variance below gate on bzip2,
+  indeterminate on libquantum; normality NOT claimed (needs dedicated
+  stable-load test). Follow-ups: dedicated normality run; padding-seed
+  build only made 15/20.
+- ROADMAP.md: Rust north star. Phase 1 spike + Phase 1b real szc `-lang=rust`
+  frontend DONE (single-threaded panic=abort, all modes, global_allocator
+  live; `~/prog/stabilizer-rust-frontend`). Phase 2 threads DESIGN done
+  (`~/prog/stabilizer-threads-design/DESIGN.md`, Shuffler-based). Phase 3/4
+  pending.
+- FOLLOW-UPS.md: phantom-speedup archaeology; Mesh AFL++; old-papers-mine.
 
-## Blocked / pending
-
-- **codex cross-model pass**: quota-blocked until 2026-08-08 ~20:43
-  (error in task log). Run against SCOPING.md revision cd2fc63 or later.
-- **Push to matthiasgoergens/stabilizer**: needs Matthias's go-ahead.
-- **Contacting Parsa Amini / upstream authors**: only with approved text;
-  two working fixes + the RNG finding are the material.
-
-## Unverified beliefs (do not quote as fact)
-
-- The 256-byte-window characterisation of getRandomByte's steady state
-  (uint8_t wrap → 4 random + 252 .bss bytes/cycle): source-read
-  derivation, independently re-derived by DeepSeek stepping the code
-  (deepseek-rng-trace-verdict.txt, CONFIRMED) — but derived twice,
-  measured never; the ~10-line harness is still required before
-  external use. (The reset-to-4 bug itself IS verified: gdb + fix +
-  170-epoch runs.)
-- Cross-model review of both fixes done and adjudicated
-  (scoping-notes/deepseek-fix-review-adjudication.md): heap-fix findings
-  both refuted by reading the code; stack-fix review surfaced a real
-  residual — getRandomByte returns four 0x00 bytes before its first
-  refill (also true in the 2013 original). Open micro-fix: initialise
-  _randCount = sizeof(int). Signal-reentrancy note folded into the
-  threads work item.
-- Dead2's README claim that SZ_HEAP/SZ_LINK "work" on LLVM 12 was never
-  build-verified; treat with the same scepticism parsa's claim earned.
-- Pilot anomalies unexplained: PADDED within-seed CV (~1.5%) > SINGLE CV
-  (0.71%) despite identical binaries; DIEHARD Shapiro-Wilk p=0.035.
-  Small n — re-examine at scale, don't build on them.
-
-## Next actions, in order
-
-1. Confirm the getRandomByte cycle with a tiny harness (pure userspace,
-   minutes); update runtime-analysis.md addendum from "derived" to
-   "measured" (or correct it). Also the trivial residual fix:
-   initialise _randCount = sizeof(int) so call 1 refills (kills the
-   first-four-zeros defect).
-2. Codex pass after quota reset (Aug 8 ~20:43): SCOPING.md revision
-   cd2fc63+, and a review of the three fix commits in
-   ~/prog/stabilizer-parsa-fix/stabilizer.
-3. Decisions for Matthias, now unblocked by the probe closing
-   affirmative: (a) push this repo to matthiasgoergens/stabilizer?
-   (b) offer the three fixes to parsa/stabilizer (text for approval
-   first)? (c) scale the baseline to BASELINE.md proper — now can
-   include a working modern-Stabilizer arm, which makes it the full
-   three-way comparison the brief wanted (with the era confound gone,
-   since the port runs on today's toolchain).
-
-Cross-model review of session diffs: not run — no uncommitted diff; codex
-quota-blocked. DeepSeek reviewed the *document* (CONFIRMED), not the code.
-The two port fixes live in ~/prog/stabilizer-parsa-fix/stabilizer (not
-this repo) — worth a codex review of those two commits tomorrow.
+## Next actions when Bash returns, in order
+1. Commit this NEXT.md (scoping repo) + push.
+2. Finish bug-#4 verification (⛔ list above); if clean, codex+deepseek the
+   diff, then post PR3.
+3. Consider bug #5 as its own investigation/PR.
+4. Baseline follow-ups (dedicated normality experiment; fix padding-seed
+   build) if continuing the measurement thread.
