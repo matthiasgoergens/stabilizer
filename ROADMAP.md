@@ -20,35 +20,60 @@ Ordered so each phase de-risks the next and produces a working artefact,
 per "smoke-test end to end before scaling up" and "try the naive thing
 first".
 
-### Phase 1 — minimal single-threaded Rust, end to end (SPIKE, start now)
-Goal: one trivial single-threaded Rust program, `panic = "abort"`,
-re-randomising correctly under all three modes with output matching an
-uninstrumented build. Deliberately dodges the two hardest axes (threads,
-unwinding) to surface the *integration* obstacles concretely:
-- rustc `--emit=llvm-bc` (or `-Cembed-bitcode`) into the `szc`
-  bitcode→`opt`→link path the driver already uses for Flang.
-- `#[global_allocator]` shim forwarding to the Stabilizer heap (or accept
-  no heap-randomisation for the spike and confirm code/stack work).
-- Entry point: reconcile the runtime's `main` hijack with Rust's
-  `lang_start`. Likely `#![no_main]` + a C `main` shim, or a
-  `#[no_mangle] extern "C" fn main` experiment.
-This is a spike: its output is a list of the real obstacles + a working
-minimal case, not production support. Expect surprises; record them.
+### Phase 1 — minimal single-threaded Rust, end to end (SPIKE — DONE 2026-08-08)
+**Result: succeeded.** A trivial single-threaded Rust program
+(`panic=abort`, `#[inline(never)]` on the hot fn) runs correctly under
+`-Rcode`, `-Rstack`, `-Rheap` and all combined — verified against an
+arithmetic invariant and the uninstrumented oracle across 7 runs, with
+real re-randomisation events firing. Repo:
+`~/prog/stabilizer-rust-spike/` (commit `61a6d66`, NOTES.md has the full
+ladder). Confirms the mechanism is frontend-agnostic in practice, not
+just in principle. Estimate for a real Rust frontend: **days, not weeks**
+— the durable cost is toolchain bookkeeping and formalising the
+linker-substitution trick, engineering not research. Concrete obstacles
+found (all worked around within budget):
+- **Bitcode version skew.** rustc stable 1.97.1 ships LLVM 22.1.6 vs the
+  container's `opt` 21.1.8; raw bitcode → `Unknown attribute kind (105)`,
+  textual-IR fallback → `unterminated attribute group`
+  (`nocreateundeforpoison`, an LLVM-22 keyword). Bisected to rustc 1.93.0
+  = exact LLVM 21.1.8 match, but that pin is a ~18-week cadence
+  coincidence, not a guarantee. **A real Rust frontend must match
+  rustc's LLVM to the pass's LLVM** (or build the pass against rustc's
+  LLVM).
+- **Linking gap.** `--emit=llvm-bc` exposes only the user crate's CGU;
+  rustc's allocator-shim CGU and all of `std`/`core`/`alloc`'s
+  precompiled rlib internals are invisible to the bitcode pipeline. Spike
+  worked around it with a `-Clinker=` shim that captures rustc's real
+  link line and swaps in the Stabilizer-transformed object, leaving std
+  unrandomised — deliberate scope narrowing; whole-program Rust needs std
+  built as bitcode (Phase 4).
+- Open, not root-caused (no misbehaviour observed): `TextRelocations`
+  logs "0 supported relocations" even when one was engineered; `readelf`
+  corroborates zero in range, so it may be correct (the pass's IR-level
+  table already covers this all-integer test). Next test: add an FP
+  literal / jump table.
 
-### Phase 2 — threads (the load-bearing hard part)
+### Phase 2 — threads (the load-bearing hard part) — DESIGN DONE 2026-08-08
 The runtime is structurally single-threaded: unlocked global registries,
 `ITIMER_REAL` delivered to an arbitrary thread, one `topFrame`, one stack
 walked at mark/sweep. Real Rust (and `std` itself) is threaded, so this
-is the wall. **This is where the prior-art rule fires**: concurrent
-in-process code re-randomisation is exactly what Shuffler (OSDI'16),
-TASR, and Morpheus solved for the security threat model. Design the
-concurrency model *drawing on them, in parallel with building* — do not
-reinvent async-safe code migration from scratch. Sub-problems:
-- Locking / lock-free access to the function & location registries.
-- Relocating code a *sibling thread* may be executing (the deep one —
-  Shuffler's core contribution).
-- Per-thread stack walking for the mark phase; per-thread trap state.
-- Signal/timer strategy across threads.
+is the wall. Prior-art design delivered:
+`~/prog/stabilizer-threads-design/DESIGN.md` (627 lines, Shuffler OSDI'16
++ TASR CCS'15 PDFs saved). Recommended protocol: **per-thread `topFrame`**
+(fixes the single global anchor at `libstabilizer.cpp:38`); route the
+timer through **one dedicated maintenance thread** that signals every
+live thread to unwind and mark its own stack; **free a FunctionLocation
+only after a barrier** confirms all threads reported (Shuffler §3.2/§4).
+The in-place jump/trap entry rewrite needs **an atomic single-word
+indirection, not a lock** — the hazard is a concurrent instruction
+*fetch*, which no mutex touches (Shuffler + TASR converge on this).
+**Biggest risk (from the design): a thread blocked in a long syscall or
+spinning in uninstrumented code during an epoch** — Shuffler's paper
+never addresses it; naive stop-the-world hangs the barrier, and exempting
+unresponsive threads reintroduces the use-after-free. Fallback:
+livepatch's per-task lazy graduation. Build that falsifying experiment
+first. (Citation fix: Morpheus is ASPLOS 2019, not ISCA; Torrellas is not
+an author.)
 
 ### Phase 3 — unwinding, TLS, hardened targets
 - `.eh_frame` for relocated code (so Rust panics / C++ exceptions unwind
@@ -56,8 +81,19 @@ reinvent async-safe code migration from scratch. Sub-problems:
   interim.
 - Port the TLS-via-relocation-table fix (magras `4e154b8f`, absent from
   parsa's lineage) and verify with a `__thread` / Rust thread-local case.
+  (Note: parsa's `applyTextRelocs` already handles TLS *relocation types*
+  in the code path — GOTTPOFF/TLSGD/TLSLD etc. — so the code-relocation
+  side may be partly covered; the magras fix is about the stack-pad
+  relocation table, a different path. Confirm which gaps remain.)
 - CET/`-fcf-protection` and MDWE-hardened targets: measure what breaks,
   decide adapt-vs-document.
+- Also fold in the two hardening items surfaced by cross-model review of
+  the fixes: `setHandler`'s uninitialised `sigaction.sa_mask`
+  (pre-existing), and `getRandomByte`'s **per-translation-unit static
+  state** — each TU gets its own `_rng`, so the runtime runs several
+  independent RNG sequences (a real randomisation-quality issue, not just
+  a threading one; DeepSeek code review, 2026-08-08). Consider a single
+  shared, locked RNG when threads land.
 
 ### Phase 4 — real Rust + productionising
 Full `std` Rust (threads, panics, TLS), a `#[global_allocator]` crate for
