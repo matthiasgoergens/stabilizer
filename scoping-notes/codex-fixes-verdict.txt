@@ -1,0 +1,21 @@
+No refutation found for the five changes in their current composition.
+
+The key invariant holds: the wrapper’s public size is rounded first, then `ShuffleHeap` and `KingsleyHeap` use the same class-sized value. Thus requests through 256 bytes remain shuffled; 257 bytes and above bypass on allocation and now bypass on free as well. This remains true across realloc growth/shrink and the 256/257 boundary. See [ShuffleFreeGuard](/home/matthias/prog/stabilizer-parsa-fix/stabilizer/runtime/Heap.h:49), [ShuffleHeap](/home/matthias/prog/stabilizer-parsa-fix/stabilizer/DieHard/src/include/shuffleheap.h:26), [ANSI realloc](/home/matthias/prog/stabilizer-parsa-fix/stabilizer/Heap-Layers/wrappers/ansiwrapper.h:89), and [size-class free routing](/home/matthias/prog/stabilizer-parsa-fix/stabilizer/Heap-Layers/heaps/combining/strictsegheap.h:106).
+
+Small code allocations are unaffected by the code-heap guard: they still enter the already-filled shuffle path, and free performs the normal one-in/one-out buffer swap. Large code allocations never touch those buffers, so they cannot starve or corrupt them.
+
+For RNG, the built DSO contains two local `getRandomByte` copies and two independent static states, as expected from `static inline`; each call site now cycles only over indices 0–3. The only nuance is documentary: `_rng` is constructed on the first call even before 24df701, so “zero RNG draws” is accurate only for `_rng.next()`, not for the two `/dev/urandom` seed reads in [RandomNumberGenerator](/home/matthias/prog/stabilizer-parsa-fix/stabilizer/DieHard/src/include/rng/randomnumbergenerator.h:19). It does not invalidate the fix.
+
+I also ran the fresh full-mode binary (`libquantum 851 2` with all three modes): exit 0 after about fifty timer epochs. `make --question` reports the build current; the worktree remains clean.
+
+One pre-existing concern, not introduced by these commits: the runtime performs complex work from signal handlers and leaves `sigaction.sa_mask` uninitialised in [setHandler](/home/matthias/prog/stabilizer-parsa-fix/stabilizer/runtime/libstabilizer.cpp:283). That deserves a separate hardening change, but it neither creates a same-TU RNG race in the present call graph nor changes these verdicts.
+
+f9ed534 — **CONFIRMED**
+
+29afeef — **CONFIRMED**
+
+19137a3 — **CONFIRMED**
+
+24df701 — **CONFIRMED**
+
+6b263a4 — **CONFIRMED**

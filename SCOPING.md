@@ -5,12 +5,19 @@ review (in-family refutation agent) found the first draft overclaimed its
 two load-bearing inferences, and this version corrects them. The first
 verification experiment it demanded has since landed and passed (original
 survives ~173 re-randomisation epochs on a real benchmark, all modes, §2);
-the second resolved the Heap-Layers confound and yielded the first fix —
-the `-Rheap` crash is root-caused and repaired (§1). A cross-model pass
-(DeepSeek, reasoning model) returned CONFIRMED against this revision
-(`scoping-notes/deepseek-verdict.txt`); a codex pass is queued behind
-quota as a second family. The recommendation remains conditional on the
-task-4 baseline either way.
+the second resolved the Heap-Layers confound and yielded the fixes (§1).
+Cross-model history, honestly scoped: a DeepSeek pass returned CONFIRMED
+against the 2026-08-07 revision (`deepseek-verdict.txt`) — that verdict
+**predates the port fixes and stress results and does not confirm the
+present text**; a codex pass on 2026-08-08 returned **WEAKENED**
+(`codex-scoping-verdict.txt`), and this revision is the response to it:
+stale contradictory prose removed, the reversed bzip2 preliminary and
+the ~2× overhead disclosed in §0/§3, coverage claims re-scoped to what
+the notes' own statements support, the gate pre-registered (§3.1a), and
+an evidence manifest added (`scoping-notes/evidence-manifest.md`) so the
+out-of-repo validation artefacts are pinned. Codex separately CONFIRMED
+all five port-fix commits (`codex-fixes-verdict.txt`). The
+recommendation remains conditional on the task-4 baseline.
 
 Evidence base: `scoping-notes/` in this repo — `runtime-analysis.md` (source
 read of the runtime and pass), `fork-survey.md` (51 repos, all 163 branches
@@ -29,23 +36,26 @@ code, stack and heap randomisation with *within-run* re-randomisation, and
 the nearest partial forms are DieHard's per-malloc shuffling (heap only,
 maintained) and security-world re-randomisers (unusable research
 artifacts); LLVM never rejected such a facility — nobody ever proposed one.
-Both empirical checks were encouraging but bounded: the **original builds
-and runs on 2026 hardware, and survives sustained re-randomisation on a
-real benchmark** (period container: `libquantum 851 2`, ~173 epochs per
-run, each mode separately and all combined, output byte-identical to the
-uninstrumented oracle), and **`parsa/stabilizer` builds clean against
-LLVM 21 with PIE working**, then crashes at three sites under sustained
-execution — a
-lower bound from one benchmark, with the crash sites located but not yet
-root-caused, a possible Heap-Layers-version confound not yet excluded, and
-at least one further known bug class (TLS, fixed in the magras lineage,
-absent from parsa's ancestry) untriggered by that benchmark. The
-recommendation is therefore **conditional, per the brief's own gate**: run
-the baseline experiment (task 4) to learn whether per-build padding plus
-heap randomisation is good enough, while in parallel probing the port's
-tractability by fixing the first crash — and commit to the full
-resurrection only if the baseline shows the cheap route insufficient and
-the probe shows the port sound.
+Both empirical checks landed: the **original builds, runs, and survives
+sustained re-randomisation on 2026 hardware** (period container:
+`libquantum 851 2`, ~173 epochs per run, each mode separately and all
+combined, output byte-identical to the uninstrumented oracle), and
+**`parsa/stabilizer` now works on LLVM 21**: it built clean with PIE
+working, initially crashed at three sites under sustained execution, and
+all three were root-caused and fixed the same day (§1, §3.2), then
+stress-tested (984k AFL execs, 0 crashes) — with the caveat that
+"works" is attested on two single-threaded C benchmarks, and the known
+port debt (threads, TLS, unwinding, hardened targets) is real. Two
+honest complications temper the enthusiasm: **preliminary, low-powered
+bzip2 data came out *reversed* from the paper's normality prediction**
+(per-build padding means looked normal, Stabilizer's within-run samples
+did not — §3.1) and **measured Stabilizer overhead was ~2×, far above
+the paper's <7% median claim**, both awaiting the clean re-run. The
+recommendation is therefore **conditional, per the brief's own gate**:
+the port-tractability condition is now met; the baseline condition is
+open, pre-registered in §3.1a, and decided by the experiment currently
+running — commit to the full resurrection only if the cheap route
+proves insufficient under those pre-specified criteria.
 
 ## 1. The alternatives, evaluated
 
@@ -93,7 +103,13 @@ here. (One paragraph, as the brief requested.)
 ### The community forks — the survey corrected the five-minute pass
 
 `fork-survey.md`; 51 repos (47 in the fork graph + the detached Dead2
-cluster), all 163 branches compared, diffs read for everything ahead.
+cluster), all 163 branches compared by ahead/behind; classification of
+the 15 ahead branches from diffstats plus commit messages, with two full
+patches spot-read (the survey's own coverage statement is the authority
+on what was and was not examined). Note one internal discrepancy: the
+`alternatives.md` sweep, written concurrently, knew only the two frozen
+2023 forks — the fork survey then found `parsa/stabilizer`; the survey
+supersedes the sweep on fork facts.
 
 - **`parsa/stabilizer`** (Parsa Amini, STE||AR Group; fork-of-a-fork,
   invisible to the earlier pass): 26 commits ahead, linear, active
@@ -300,6 +316,38 @@ localised defects. Run both prongs in parallel; neither blocks the other:
    allocation overhead mean that arm measures layout variance *under
    DieHard*, not under glibc malloc — fine for A/B, but a different
    allocator regime.
+1a. **Pre-registered gate criteria** (written 2026-08-08 ~23:00, while
+   the v2 batch is mid-run and unexamined beyond its first pairs;
+   responding to the codex finding that an unspecified gate lets either
+   outcome be rationalised). Primary estimand: the within-pair
+   treatment/PLAIN wall-time ratio from the globally randomised,
+   PLAIN-paired schedule. Analysis: seed treated as a random effect;
+   inference by seed-level bootstrap (BCa, ≥10k resamples) and a blocked
+   permutation test as the non-parametric cross-check; method-of-moments
+   components reported descriptively only; raw and load-adjusted both
+   reported. Smallest effect of interest: 1% (the AFL++ case that
+   motivated this project claimed 3.7%). Decision rule for "the cheap
+   route is sufficient": the padding between-seed σ_b (as % of mean),
+   upper 95% bound, is **< 0.5%** on both benchmarks under K-seed
+   blocking — i.e. averaging over 15+ seeds controls the layout lottery
+   to well under the smallest effect of interest — AND the DieHard arm
+   shows no unexplained variance inflation. Decision rule for "the port
+   pays": Stabilizer arms must *both* (a) deliver calibrated inference —
+   assessed by whether its within-run distribution supports the
+   parametric shortcut it promises (normality of its samples, or
+   demonstrated CI coverage under resampling) — and (b) cost overhead
+   **< 25%** on these benchmarks; at the measured ~2× preliminary
+   overhead, K-seed blocking plus non-parametric analysis buys the same
+   protection for less compute unless (a) is strongly positive. The
+   normality comparison must respect aggregation symmetry (compare
+   like-with-like: per-run samples vs per-run samples, per-seed means vs
+   per-epoch means where extractable), not raw Shapiro p-values across
+   differently-aggregated distributions. Capability constraints recorded
+   as gate inputs, not footnotes: no threads, no TLS workloads, no C++
+   unwinding through relocated frames, debugger-hostile, unhardened
+   binaries only. If the gate says "cheap route sufficient", the honest
+   deliverable is BASELINE.md + upstreaming the harness improvements,
+   and the port stops at "preserved, working, documented".
 2. **Probe the parsa runtime's tractability — COMPLETE, answer:
    tractable.** All three characterised crashes root-caused and fixed
    same-day (`~/prog/stabilizer-parsa-fix/`, commits `f9ed534` `29afeef`
@@ -324,12 +372,18 @@ localised defects. Run both prongs in parallel; neither blocks the other:
    The probe condition in the gate above is therefore satisfied; the
    baseline condition remains open. Known remaining debt for the port
    proper: the TLS bug class (magras `4e154b8f`) untriggered by
-   libquantum; threads; unwinding; the first-four-zeros RNG residual;
-   debugger incompatibility (gdb/strace vs the `int3` protocol) to
-   document. Engage Parsa Amini (a two-day commit burst in Feb 2026,
-   prior burst April 2023 — an intermittent solo effort, not an active
-   team) with the three fixes — subject to the house rule that nothing
-   is posted without Matthias approving the text.
+   libquantum; threads; unwinding; debugger incompatibility (gdb/strace
+   vs the `int3` protocol — gdb breakpoints and the runtime both write
+   0xCC and corrupt each other's restore bookkeeping) to document; and
+   two hardening items from cross-model review: `setHandler` leaves
+   `sigaction.sa_mask` uninitialised (pre-existing upstream — garbage
+   mask on a stack struct), and `getRandomByte`'s signal-handler
+   reentrancy becomes real the moment threads exist. (The
+   first-four-zeros RNG residual is fixed, `24df701`.) Engage Parsa
+   Amini (a two-day commit burst in Feb 2026, prior burst April 2023 —
+   an intermittent solo effort, not an active team) with the five
+   commits — subject to the house rule that nothing is posted without
+   Matthias approving the text.
 3. **Drop Darwin and PPC** (Context test is Mach-O-only anyway), rewrite
    the Python 2 tooling trivially, and treat the **normality replication
    as the first experiment any revived Stabilizer runs** — no independent

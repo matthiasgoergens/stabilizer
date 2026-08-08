@@ -1,0 +1,42 @@
+## Adversarial review
+
+The conditional resurrection recommendation is materially weakened. The port-fix evidence makes `parsa/stabilizer` more promising than the document’s older text suggests, but the document is internally inconsistent, its decision gate cannot yet yield a defensible yes/no decision, and it omits the most important preliminary performance result.
+
+| Finding | Why it matters |
+|---|---|
+| Contradictory port status | The opening says every sustained mode crashes and the defects remain unroot-caused ([SCOPING.md:32](/home/matthias/prog/stabilizer/SCOPING.md:32), [SCOPING.md:104](/home/matthias/prog/stabilizer/SCOPING.md:104)); later it says all three are fixed and sustained all-mode runs pass ([SCOPING.md:132](/home/matthias/prog/stabilizer/SCOPING.md:132), [SCOPING.md:303](/home/matthias/prog/stabilizer/SCOPING.md:303)). The recommendation then reverts to describing three open crash sites ([SCOPING.md:252](/home/matthias/prog/stabilizer/SCOPING.md:252)). These cannot all describe the current state. |
+| DeepSeek “CONFIRMED” is stale | The cited DeepSeek verdict discusses the port’s “current breakage” and treats tractability as open; it predates the fixes and stress results. It cannot confirm this revision. The document’s appeal to it is therefore invalid provenance, not independent confirmation. |
+| Evidence-base claims overstate coverage | The document says all ahead fork diffs were read ([SCOPING.md:95](/home/matthias/prog/stabilizer/SCOPING.md:95)), while the fork survey says only two full patches were spot-read and no substantive fork was built ([fork-survey.md:453](/home/matthias/prog/stabilizer/scoping-notes/fork-survey.md:453)). The alternatives note also says the only forks found were two frozen 2023 forks, missing the very `parsa` port on which the recommendation relies ([alternatives.md:223](/home/matthias/prog/stabilizer/scoping-notes/alternatives.md:223)). “Nothing maintained anywhere” is not supportable from these surveys; “nothing found in the surveyed public sources” is. |
+| Load-bearing validation is outside the declared evidence base | The claimed fixes, fuzzing, soak and period-container results live under `~/prog/...`, not in this repository or the listed evidence notes. That does not make them false, but it means a reader cannot reproduce or audit the evidence from the stated evidence base. It cannot carry a firm recommendation until the commands, revisions, patches, logs, toolchain/container digests and raw results are committed or linked immutably. |
+| The preliminary bzip2 result is omitted | The current baseline draft records a clean-but-low-powered bzip2 arm that is reversed from the prediction: padded seed means do not reject normality (Shapiro \(p=0.15\)); all four Stabilizer configurations reject it (\(p\le0.007\)). It also reports roughly +91–97% Stabilizer overhead. [BASELINE-draft.md:35](/home/matthias/prog/stabilizer-baseline/BASELINE-draft.md:35) The SCOPING document mentions only bzip2 correctness, not this performance result. |
+
+The bzip2 result should not decide the issue: it needs replication, and the full v1 batch was contaminated for libquantum. But omission is not neutral. It is precisely the first data point that challenges the proposed distinctive benefit of resurrection, so it belongs prominently in SCOPING as “preliminary, reversed, and unresolved”.
+
+## The gate does not currently decide the recommendation
+
+“Padding plus DieHard captures most layout variance” has no pre-registered threshold, confidence criterion, workload population, or cost budget. Thus either outcome can be rationalised after seeing the data. The gate should specify, before collecting more runs:
+
+- the smallest effect worth detecting and the maximum acceptable uncertainty;
+- \(K\), repetitions and the target workload set;
+- a paired, globally randomised A/B schedule, with seed as a random effect and run order/load recorded;
+- a decision rule based on confidence intervals or a hierarchical/permutation analysis, rather than whether a variance-component point estimate looks “large”;
+- an overhead and capability threshold: threads, C++ unwinding, TLS, CET/MDWE-hardened binaries and debugger support are product constraints, not residual footnotes.
+
+There is also an estimand problem. `LD_PRELOAD` DieHard changes allocator behaviour, working-set size and allocation cost. It can be a valid benchmarking regime if both treatment and control use it, but it cannot establish that a glibc-based A/B experiment is adequately protected, nor that code/stack perturbation adds no value. Low variance under one padding distribution plus one allocator is not evidence that unobserved layout axes are irrelevant.
+
+The pilot ANOVA is not gate-quality evidence: it has three repetitions per seed, a known run-order trend, and no uncertainty interval for the variance component. Its \(p=0.059\) is neither evidence of a 30% component nor evidence against one. The subsequent full batch’s libquantum arm is explicitly invalid because of concurrent load.
+
+## Normality/ANOVA case
+
+The document correctly concedes that modern non-parametric and uncertainty methods reduce the rhetorical importance of “licenses ANOVA”, but it does not follow that the remaining normality experiment is load-bearing.
+
+- A Shapiro–Wilk non-rejection does not establish Gaussian data; with 15 padded seed means it has limited discriminatory power. Conversely, a rejection does not tell us whether the proposed treatment comparison has unacceptable Type-I error or interval coverage.
+- The comparison is asymmetric: padded observations are means over several process runs, while Stabilizer observations are whole executions that internally average many epochs. Different aggregation alone can change shape. Test residuals from the actual hierarchical A/B model, or empirically assess coverage/false-positive behaviour, rather than compare raw Shapiro p-values.
+- One-way ANOVA assumes independent, homoscedastic residuals. The experiment already found temporal drift, and repeated runs nested within a binary seed are hierarchical. A mixed model, cluster/bootstrap resampling at the seed level, or a blocked permutation test is the relevant analysis.
+- “Go non-parametric and pay in runs” is too broad. HPT was specifically proposed to avoid normality and to be more practical than standard parametric techniques when large samples are unavailable. [Chen et al., *Statistical Performance Comparisons of Computers*](https://citeseerx.ist.psu.edu/document?doi=ed22d4f48f9274ed150a7f81acc5609d33d55e05&repid=rep1&type=pdf) Effect-size confidence-interval work likewise treats compilation and execution nondeterminism as multiple sources to model, not as a reason to demand Gaussian raw timings. [Kalibera & Jones](https://arxiv.org/abs/2007.10899)
+
+Within-run re-randomisation may still be worthwhile for variance efficiency or for sampling code/stack/heap effects unavailable elsewhere. The evidence does not yet show either benefit on a modern workload, and bzip2 is preliminary evidence in the opposite direction.
+
+The document should be revised to: remove stale crash prose; disclose the reversed bzip2 normality result and high overhead; downgrade universal absence claims; make all validation artefacts reproducible; and replace the gate with pre-specified practical decision criteria plus a hierarchical/non-parametric analysis plan.
+
+**VERDICT: WEAKENED — the port’s local repair evidence supports continued investigation, but not the present conditional “yes”: the document contradicts itself, relies on stale confirmation and non-repository evidence, omits a reversed preliminary bzip2 result, and uses a gate/statistical framing that cannot yet decide whether resurrection is justified.**
