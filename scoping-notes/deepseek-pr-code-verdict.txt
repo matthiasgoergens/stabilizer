@@ -1,0 +1,112 @@
+## Findings & Verdicts
+
+### 1. ShuffleFreeGuard classification mismatch (Heap.h:26‑72)
+**Verdict:** CONFIRMED
+**Rationale:** `ShuffleFreeGuard::free` decides the bypass path by comparing `ShuffledHeap::getSize(ptr)` with `MaxSize`. `ShuffleHeap::malloc` decides the bypass based on the **requested size** (possibly after alignment rounding), not on the final block size reported by `getSize`. The two decisions can disagree when the underlying `KingsleyHeap` adds internal fragmentation (headers, alignment, padding) that makes `getSize(ptr) > MaxSize` even though the *request* was ≤ MaxSize and therefore the object was placed in the shuffle buffer. The guard will then incorrectly route the `free` to `UnshuffledHeap`, leaving the shuffle‑buffer slot holding a still‑valid pointer. A subsequent `malloc` of that size class will reuse the stale pointer, yielding a double‑allocation or double‑free corruption.
+
+**Failing scenario (code heap, `CodeShuffle = 256`):**
+1. Allocate `p1 = codeHeap->malloc(256)`. The `KingsleyHeap` may add a header and align to, say, 16 bytes, so the true block size becomes 272 bytes.
+2. `ShuffleHeap::malloc` sees request 256 ≤ 256, so it puts `p1` into its shuffle buffer and returns `p1`.
+3. `ShuffleFreeGuard::free(p1)` calls `ShuffledHeap::getSize(p1)` → returns 272.
+4. Because 272 > 256, the guard calls `UnshuffledHeap::free(p1)`, directly freeing the block from `KingsleyHeap` but *not* removing `p1` from the shuffle buffer.
+5. A subsequent `p2 = codeHeap->malloc(256)` finds the shuffle‑buffer slot still occupied by `p1`. `ShuffleHeap` returns `p1` again. Now both `p1` and `p2` refer to the same memory, which has also been returned to the base heap’s free list. Immediate crash or silent corruption.
+
+---
+
+### 2. `getRandomByte` not signal‑safe (Util.h:37‑50)
+**Verdict:** CONFIRMED
+**Rationale:** The static state (`_rands`, `_bigRand`, `_randCount`, `_rng`) is modified without any reentrancy protection. If a signal interrupts normal execution inside `getRandomByte`, the handler’s call can overwrite `_bigRand` and reset `_randCount`, corrupting the sequence and potentially causing out‑of‑bounds reads.
+
+**Failing scenario:**
+1. Main thread enters `getRandomByte()`, reads a byte from `_rands[2]` and is about to increment `_randCount` (or just after incrementing but before returning).
+2. Signal fires and handler calls `getRandomByte()` again. The handler generates a new `_bigRand`, sets `_randCount = 0`, and returns.
+3. Main thread resumes with the old `_rands` content and a possibly stale `_randCount`, leading to repeated or out‑of‑bounds accesses.
+
+---
+
+### 3. Per‑translation‑unit static state of `getRandomByte` (Util.h:38)
+**Verdict:** CONFIRMED
+**Rationale:** `_rng` and `_randCount` are function‑local statics inside an `inline` function defined in a header. C++ gives each translation unit its own copy. The library thus runs multiple independent pseudo‑random sequences, weakening the re‑randomisation and potentially creating correlations or even identical sequences (if the default seed is the same everywhere).
+
+**Failing scenario:**
+1. Two `.c` files each define a function that calls `getRandomByte()`.
+2. Both compilations instantiate their own `_rng`. If the default seed is the same, both sequences are identical, making certain security‑sensitive re‑randomisations predictable.
+
+---
+
+### 4. Code‑heap guard starving / corrupting the shuffle buffer
+**Verdict:** REFUTED
+**Rationale:** On the code heap all actual allocations are > 256 bytes (`FunctionLocation` code + relocation table), so `malloc` always takes the bypass and the shuffle buffer is never populated. The guard’s bypass on free therefore never interacts with a non‑empty buffer; it cannot starve or corrupt it.
+
+---
+
+## Proposed Measurements
+
+### DECISIVE – Classification mismatch
+**Goal:** Determine whether a 256‑byte allocation on the code heap is freed via `ShuffleHeap::free` or via `UnshuffledHeap::free`.
+**Method:**
+1. Add a temporary debug trace inside `ShuffleFreeGuard::free` in **Heap.h**:
+   ```cpp
+   inline void free(void* ptr) {
+       if (ptr == nullptr) return;
+       size_t sz = ShuffledHeap::getSize(ptr);
+       if (sz > MaxSize) {
+           fprintf(stderr, "HEAP_GUARD: bypass free size %zu > %zu\n", sz, (size_t)MaxSize);
+           UnshuffledHeap::free(ptr);
+       } else {
+           fprintf(stderr, "HEAP_GUARD: shuffled free size %zu <= %zu\n", sz, (size_t)MaxSize);
+           ShuffledHeap::free(ptr);
+       }
+   }
+   ```
+2. Write a small test program that:
+   - Initialises the stabiliser runtime.
+   - Allocates 256 bytes via `getCodeHeap()->malloc(256)`.
+   - Frees that pointer.
+3. Compile and run.
+**Predicted output under correct guard:** `"HEAP_GUARD: shuffled free size … <= 256"`.  
+**Predicted output under classification mismatch:** `"HEAP_GUARD: bypass free size 272 > 256"` (or similar >256 value).  
+If the mismatch appears, the guard is buggy; if not, the classification is safe for this size.
+
+---
+
+### EXPLORATORY – Probe `getSize` vs. request size
+**Goal:** Learn how `KingsleyHeap::getSize` relates to the original request, especially for sizes near `CodeShuffle`/`DataShuffle`.
+**Method:**
+1. In a test, allocate a series of blocks with request sizes 255, 256, 257 on the code heap. Immediately after each `malloc`, call `codeHeap->getSize(ptr)` and print both the request size and the returned size.
+2. Repeat for the data heap with sizes 767, 768, 769.
+**Purpose:** See if the returned size ever exceeds `MaxSize` for requests ≤ `MaxSize`. This confirms or refutes the mismatch hypothesis directly, without relying on the guard’s branch being taken.
+
+---
+
+### DECISIVE – Per‑translation‑unit static state
+**Goal:** Demonstrate that two TUs see independent RNG states.
+**Method:**
+1. Create two source files `a.c` and `b.c`:
+   - `a.c`: `void a() { printf("a: %02x\n", getRandomByte()); }`
+   - `b.c`: `void b() { printf("b: %02x\n", getRandomByte()); }`
+2. In `main.c`, call `a()` and `b()` (ensuring default initialisation, identical seeds).
+3. Compile all together with the stabiliser runtime.
+**Predicted output:** Both prints show the same byte value (e.g., `a: 33  b: 33`), proving separate generators.  
+**If the RNG were truly global (or magically synchronised) the bytes would differ—counter‑evidence.**
+
+---
+
+### EXPLORATORY – Signal‑handler reentrancy detection
+**Goal:** Catch actual reentrancy during stress testing.
+**Method:**
+1. Add a simple reentrancy guard *inside* `getRandomByte`:
+   ```cpp
+   static bool _in_use = false;
+   if (_in_use) {
+       fprintf(stderr, "REENTRANCY DETECTED\n");
+       abort();
+   }
+   _in_use = true;
+   // ... existing body ...
+   _in_use = false;
+   ```
+2. Run a stress test that continuously allocates and frees memory while a periodic signal (e.g., SIGALRM) fires at a high rate; the signal handler itself calls `getRandomByte` (e.g., to decide a re‑randomisation action).
+3. If the program aborts with the message, signal reentrancy is real and dangerous.
+
+These measurements will either support or refute the identified defects and guide the final fix.

@@ -1,0 +1,55 @@
+After careful adversarial review of the supplied material, I find one claim in the PR draft unsupported by the evidence provided, which weakens a significant inference about the original tool’s stack‑randomisation quality. The tone is appropriate, and most technical claims are backed, but this gap requires an edit before posting. I also advise splitting the PR into two logical parts.
+
+### Unsupported claim and its consequences
+
+The PR draft states (around line 35–37 of the draft):
+> *“the stack pads are getRandomByte()’s only consumer, so stack‑randomisation quality in the original tool was substantially degraded by this bug”*
+
+This claim relies on the assertion that *no other code* in the original 2013 Stabilizer runtime calls `getRandomByte()`. The draft itself does not cite any source file or line; it merely references the analysis notes (`runtime-analysis.md` addendum) which say the same thing without direct code citation. The provided diff and commit logs cover only `Util.h` and `Heap.h`; they do not include `Function.cpp` or any other file that would demonstrate exclusivity. A maintainer would rightly ask: **has the entire runtime been audited, and is it absolutely certain that no other translation unit or later-added code uses `getRandomByte()`?**
+
+If any other call site exists (e.g., in code‑placement initialisation, or in a future extension), the statement that stack‑randomisation quality was *substantially degraded* becomes an overstatement, because the bug’s impact would not be limited to stack pads. The conclusion that “the paper’s stack‑ablation numbers are affected” is therefore premature without a complete call‑graph scan.
+
+Because this claim is presented as a fact and is used to argue that the original tool’s stack randomness was crippled, it must be either removed or backed by a concrete, verifiable traversal of the runtime source. As it stands, it is **unverifiable** from the provided evidence.
+
+### Measurements to settle the exclusivity question
+
+**EXPLORATORY**  
+1. **Grep all call sites in the original 2013 repository**  
+   Run inside `~/prog/stabilizer/runtime/` (the untouched 2013 code):
+   ```
+   grep -rwn 'getRandomByte' --include='*.cpp' --include='*.h' --include='*.c'
+   ```
+   This will list every file and line where `getRandomByte` appears. If any file other than `Function.cpp` (stack‑pad assignment) or `libstabilizer.cpp` (the timer handler that calls `Function::refreshPad`) contains a call, the exclusivity claim is false. (Predicted: only the expected files, but exploration needed.)
+
+**DECISIVE**  
+2. **Dynamic trace of calls to `getRandomByte`**  
+   Build the original 2013 Stabilizer with a simple wrapper that logs callsite addresses. For example, replace the static inline function with a macro that increments a counter per call site. Run `libquantum 851 2` under `-Rstack` and observe which counters are hit. If any counter corresponds to a non‑stack‑pad context, the claim is refuted. (Predicted under the claim: only two contexts — pad initialisation and pad refresh.)
+
+These measurements are concrete; the counterpart can report the grep results and, if needed, implement the dynamic trace.
+
+### Tone assessment
+
+The tone is respectful and humble: it opens with thanks, complements the maintainer’s work, and avoids any accusatory language. It does not over‑explain in an AI‑style manner. The voice is established immediately as a contributor, not a critic. This aspect is fine.
+
+### Advice on PR structure (ONE vs TWO)
+
+The current PR mixes two distinct categories of fixes:
+
+- **Port‑specific heap‑bypass fixes** (commits `f9ed534`, `19137a3`, `6b263a4`): these address a missing symmetry in the modern `ShuffleHeap` adaptation, entirely confined to the `parsa/stabilizer` port.
+- **Inherited `getRandomByte` bug fixes** (`29afeef`, `24df701`): a 2013 latent bug that also affects the upstream `ccurtsinger/stabilizer` repository.
+
+The maintainer would benefit from having these separated:
+- A first PR with the heap fixes (title: “Fix data‑heap and code‑heap crashes under sustained re‑randomisation”)
+- A second PR with the `getRandomByte` OOB and first‑four‑zeros fixes, noting it is a pre‑existing upstream bug (title: “Fix latent out‑of‑bounds in getRandomByte, present since 2013”)
+
+This separation makes the port‑specific nature clear and allows the maintainer to decide whether to forward the `Util.h` fix upstream without being tied to the port’s DieHard changes.
+
+### Final recommendation
+
+**POST‑WITH‑EDITS**. Specifically:
+1. Remove the unsupported claim “stack pads are getRandomByte()’s only consumer” (or replace it with a hedged statement and a pointer to a full audit).
+2. Split the PR into two as described above.
+
+The rest of the description is accurate, backed by the diff and the `NOTES.md` gdb evidence, and the tone is maintainer‑friendly.
+
+VERDICT: UNVERIFIABLE — The exclusivity claim about getRandomByte is not supported by the provided source files; the PR must either substantiate it or remove it before posting.

@@ -1,0 +1,53 @@
+## Verdict: POST-WITH-EDITS
+
+Do not post this as one PR description. Split it first, trim it substantially, and correct the epoch/root-cause wording.
+
+### Technical corrections
+
+- “Three underlying bugs” is wrong/inconsistent. There are **three crash manifestations but two root defects**: the heap bypass asymmetry, reached through both data and code heaps; and the inherited `getRandomByte()` bug. The diff reflects that: one generic heap guard applied to two typedefs, plus two RNG changes. [diff](/home/matthias/prog/stabilizer-parsa-fix/pr-full.diff:12)
+
+- “Sustained runs … crash in all three modes” overstates the heap failure. `-Rheap` crashes on its first large realloc, before the first timer tick; only `-Rstack` and `-Rcode` are epoch-triggered crashes. [fix notes](/home/matthias/prog/stabilizer-parsa-fix/NOTES.md:10)
+
+- The data-heap GDB signature is sound, but `reqSz=512` is the old allocation’s rounded size during a realloc whose new request is 1024. Say “freeing a 512-byte old block during the first large realloc”, not simply “first realloc over 256 bytes”. [evidence](/home/matthias/prog/stabilizer-parsa-fix/NOTES.md:106)
+
+- The code-heap signature (`reqSz=4096`, `binIndex=9`, swap to null) is sound. “Essentially every `FunctionLocation` free” is fair when qualified to real/non-trivial functions. [evidence](/home/matthias/prog/stabilizer-parsa-fix/NOTES.md:632)
+
+- Attribute the heap issue more carefully. It is not simply “a bug in modern DieHard”; it is exposed by the port’s necessary whole-heap `ShuffleHeap` composition against modern DieHard. “A missing free-side bypass in the modern API composition” is more precise. The claim that pinning old dependencies is categorically “not an option” is too broad: the exact 2013 dependencies were tested and do not compile with this port, but that rationale does not belong in the PR body. [evidence](/home/matthias/prog/stabilizer-parsa-fix/NOTES.md:161)
+
+- The RNG state-machine claim is now supported: the harness measured one refill per 256 calls, 252 OOB reads and four in-buffer bytes per cycle. Remove “roughly”; it is exact for the model. But replace “the rest are whatever follows the buffer in `.bss`” with “the rest are out-of-bounds reads into adjacent storage, potentially reaching unmapped memory.” [stress evidence](/home/matthias/prog/stabilizer-stress/NOTES.md:184)
+
+- “It never crashed in 2013 because there was always mapped `.bss` after the buffer” is unsupported. The evidence only shows that the tested period build had a smaller `.bss`, did not fault through 173 epochs, and gave this static more mapped padding. [fix notes](/home/matthias/prog/stabilizer-parsa-fix/NOTES.md:458)
+
+- “Stack-randomisation quality … was substantially degraded” is a plausible source-level consequence, but too strong for this PR. The bug prevents intended RNG output for 252/256 steady-state calls; it does not measure the distribution of actual historical stack offsets or establish an effect on the paper’s results. Remove the paper/ablation paragraph or reduce it to one factual sentence.
+
+- The original-2013 comparison is accurately caveated at the end of the sentence, but “the fixed port now matches the original’s behaviour” still implies a cross-era comparison that was not run. State the two results independently. Also, `-Rheap` had 169 timer ticks, not 173 discrete heap epochs; heap shuffling is continuous rather than epoch-gated. [period results](/home/matthias/prog/stabilizer-period/NOTES.md:525)
+
+- The draft contains no AFL figures, so there is no incorrect AFL number to fix. Do not add them: the 983,748-execution AFL run tested a heap shim, not the full runtime. The “12/12” RNG-harness claim is supported. [stress notes](/home/matthias/prog/stabilizer-stress/NOTES.md:129)
+
+- “Each commit message carries the gdb evidence” is false: the two RNG micro-fixes are harness-verified, not GDB-verified.
+
+- The debugger caveat conflates two mechanisms. GDB software breakpoints collide with Stabilizer’s `0xCC` trap byte and restore bookkeeping; `strace` interferes through ptrace/SIGTRAP delivery. [GDB evidence](/home/matthias/prog/stabilizer-parsa-fix/NOTES.md:601) [strace evidence](/home/matthias/prog/stabilizer-period/NOTES.md:335)
+
+### Tone
+
+The opening thanks and specific credit for the LLVM/PIE work are good and fair. “CodeWindow/near-mapping … holds up well” is slightly vague; “I exercised the LLVM 21/PIE port with `libquantum`” is more concrete.
+
+It does not establish the author’s voice in the first sentence: it opens with a greeting and praise. Start with “I’ve been testing the LLVM 21 port on `libquantum`…” and then thank Parsa.
+
+The body reads like an investigation report rather than a maintainer-facing PR: detailed GDB locals, dependency-history argument, RNG quality analysis, paper implications, and debugger documentation proposal are all too much. Keep a short summary, the exact fixes, and a concise test statement; offer logs separately.
+
+Also delete the internal preamble and posting command (lines 1–10).
+
+### Split recommendation: two PRs
+
+Split them.
+
+1. **Port bug PR:** `f9ed534`, `19137a3`, `6b263a4`  
+   “Restore the `ShuffleHeap` free-side large-allocation bypass for data and code heaps.” This is directly caused by the LLVM-21 port’s required adaptation to modern Heap-Layers/DieHard, has one coherent mechanism, and is independently valuable.
+
+2. **Inherited RNG bug PR:** `29afeef`, `24df701`  
+   “Fix `getRandomByte()` cursor reset and initial refill.” Make clear it is inherited from `ccurtsinger/stabilizer`, not introduced by Parsa’s port. It is a candidate for an upstream report/PR too; Parsa can decide whether to carry it locally.
+
+A maintainer is more likely to accept the focused port repair without being asked simultaneously to own a historical upstream behavioural correction. The second PR also deserves discussion because `24df701` deliberately changes the first four outputs, whereas `29afeef` is the OOB repair.
+
+For the first PR, the core description can be about three short paragraphs: author/context, the free-side bypass mismatch, and test results. For the second, lead with the inherited OOB read and omit the paper-quality discussion.

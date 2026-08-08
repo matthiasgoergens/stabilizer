@@ -1,0 +1,2398 @@
+OpenAI Codex v0.147.0
+--------
+workdir: /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+model: gpt-5.6-terra
+provider: openai
+approval: on-request
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019fe1f3-80b7-7960-91b8-91ca85b3defc
+--------
+user
+changes against '2bffc191c9'
+exec
+/bin/bash -lc 'pwd
+git diff --stat 2bffc191c97008cc8ae99efbd801d8d609ce55d8
+git diff --find-renames --find-copies -- 2bffc191c97008cc8ae99efbd801d8d609ce55d8' in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 0ms:
+/home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ runtime/Heap.h | 41 +++++++++++++++++++++++++++++++++++++++--
+ runtime/Util.h |  4 ++--
+ 2 files changed, 41 insertions(+), 4 deletions(-)
+
+exec
+/bin/bash -lc 'find .. -name AGENTS.md -o -name AGENTS.override.md
+git diff --find-renames --find-copies 2bffc191c97008cc8ae99efbd801d8d609ce55d8 --
+git status --short
+git log --oneline --decorate -5' in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 0ms:
+diff --git a/runtime/Heap.h b/runtime/Heap.h
+index 563402b..344b74f 100644
+--- a/runtime/Heap.h
++++ b/runtime/Heap.h
+@@ -26,8 +26,45 @@ class CodeSource : public SizeHeap<FreelistHeap<BumpAlloc<CodeSize, MMapSource<C
+ // Modern `ShuffleHeap` takes (ChunkSize, MaxSize, SuperHeap). We use a shuffled
+ // KingsleyHeap, preserving the original `DataShuffle`/`CodeShuffle` tunables as
+ // the maximum shuffled object size.
+-typedef ANSIWrapper<ShuffleHeap<4096, DataShuffle, KingsleyHeap<DataSource, DataSource> > > DataHeapType;
+-typedef ANSIWrapper<ShuffleHeap<4096, CodeShuffle, KingsleyHeap<CodeSource, CodeSource> > > CodeHeapType;
++
++// ShuffleHeap::malloc() bypasses its own shuffle buffer for requests bigger
++// than MaxSize, calling SuperHeap::malloc() (KingsleyHeap) directly. But
++// ShuffleHeap::free() has no matching bypass: it always computes a Kingsley
++// bin index for the pointer's real size and swaps it into that bin's
++// shuffle buffer -- even for bins malloc() never filled because every
++// request that size took the bypass. For any object over MaxSize bytes,
++// that swap pulls a null pointer out of a never-filled buffer slot and
++// hands it to SuperHeap::free(), which crashes reading its size header.
++// ShuffleFreeGuard restores malloc()'s bypass for free(), routing anything
++// over MaxSize straight to the unshuffled heap underneath ShuffleHeap
++// instead of through ShuffleHeap's shuffle bookkeeping.
++//
++// The code heap hits this on essentially every free(): FunctionLocation's
++// allocations (a whole function's code, plus its relocation table if
++// adjacent) are practically always well over CodeShuffle=256 bytes, so
++// FunctionLocation::~FunctionLocation's getCodeHeap()->free() goes through
++// the same never-filled-bin swap as the data heap's realloc() did (gdb
++// confirmed: reqSz=4096, binIndex=9, ptr swapped to 0x0 at the
++// StrictSegHeap::free call, same as the -Rheap crash). Guard both heaps.
++template <size_t MaxSize, class ShuffledHeap, class UnshuffledHeap>
++class ShuffleFreeGuard : public ShuffledHeap {
++public:
++    inline void free(void* ptr) {
++        // ANSIWrapper already filters NULL on the public path; this guard
++        // keeps the class safe if it is ever composed without the wrapper.
++        if (ptr == nullptr) {
++            return;
++        }
++        if (ShuffledHeap::getSize(ptr) > MaxSize) {
++            UnshuffledHeap::free(ptr);
++        } else {
++            ShuffledHeap::free(ptr);
++        }
++    }
++};
++
++typedef ANSIWrapper<ShuffleFreeGuard<DataShuffle, ShuffleHeap<4096, DataShuffle, KingsleyHeap<DataSource, DataSource> >, KingsleyHeap<DataSource, DataSource> > > DataHeapType;
++typedef ANSIWrapper<ShuffleFreeGuard<CodeShuffle, ShuffleHeap<4096, CodeShuffle, KingsleyHeap<CodeSource, CodeSource> >, KingsleyHeap<CodeSource, CodeSource> > > CodeHeapType;
+     
+ DataHeapType* getDataHeap();
+ CodeHeapType* getCodeHeap();
+diff --git a/runtime/Util.h b/runtime/Util.h
+index e6767a5..98886de 100644
+--- a/runtime/Util.h
++++ b/runtime/Util.h
+@@ -36,7 +36,7 @@ static void flush_icache(void* begin, size_t size) {
+ 
+ static inline uint8_t getRandomByte() {
+     static RandomNumberGenerator _rng;
+-    static uint8_t _randCount = 0;
++    static uint8_t _randCount = sizeof(int);
+     
+     static union {
+         uint8_t _rands[sizeof(int)];
+@@ -45,7 +45,7 @@ static inline uint8_t getRandomByte() {
+     
+     if(_randCount == sizeof(int)) {
+         _bigRand = _rng.next();
+-        _randCount = sizeof(int);
++        _randCount = 0;
+     }
+     
+     uint8_t r = _rands[_randCount];
+6b263a4 (HEAD -> master, matthias/llvm21-fixes) runtime: null-guard ShuffleFreeGuard::free for standalone safety
+24df701 runtime: initialise getRandomByte()'s _randCount to refill on first call
+19137a3 runtime: fix -Rcode second-epoch crash via ShuffleFreeGuard on CodeHeapType
+29afeef runtime: fix getRandomByte() never resetting its read cursor
+f9ed534 runtime: fix -Rheap realloc crash via ShuffleFreeGuard
+
+exec
+/bin/bash -lc "grep -R \"class ShuffleHeap\\|struct ShuffleHeap\\|template.*ShuffleHeap\" -n .
+grep -R \"class KingsleyHeap\\|struct KingsleyHeap\\|template.*KingsleyHeap\" -n .
+grep -R \"getDataHeap\\|getCodeHeap\\|DataHeapType\\|CodeHeapType\" -n runtime | head -100
+grep -R \"getRandomByte\" -n ." in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 3247ms:
+./DieHard/src/include/shuffleheap.h:16:class ShuffleHeap : public SuperHeap {
+./Heap-Layers/heaps/general/kingsleyheap.h:51: * @class KingsleyHeap
+./Heap-Layers/heaps/general/kingsleyheap.h:61:  class KingsleyHeap :
+./Heap-Layers/heaps/general/oldkingsleyheap.h:97: * @class KingsleyHeap
+./Heap-Layers/heaps/general/oldkingsleyheap.h:107:  class KingsleyHeap :
+./DieHard/src/util/kingsleyheap.h:83: * @class KingsleyHeap
+./DieHard/src/util/kingsleyheap.h:93:  class KingsleyHeap : 
+./DieHard/src/exterminator/src/util/kingsleyheap.h:83: * @class KingsleyHeap
+./DieHard/src/exterminator/src/util/kingsleyheap.h:93:  class KingsleyHeap : 
+grep: runtime/obj/libstabilizer.o: binary file matches
+grep: runtime/obj/Heap.o: binary file matches
+grep: runtime/obj/Function.o: binary file matches
+runtime/Heap.h:45:// FunctionLocation::~FunctionLocation's getCodeHeap()->free() goes through
+runtime/Heap.h:66:typedef ANSIWrapper<ShuffleFreeGuard<DataShuffle, ShuffleHeap<4096, DataShuffle, KingsleyHeap<DataSource, DataSource> >, KingsleyHeap<DataSource, DataSource> > > DataHeapType;
+runtime/Heap.h:67:typedef ANSIWrapper<ShuffleFreeGuard<CodeShuffle, ShuffleHeap<4096, CodeShuffle, KingsleyHeap<CodeSource, CodeSource> >, KingsleyHeap<CodeSource, CodeSource> > > CodeHeapType;
+runtime/Heap.h:69:DataHeapType* getDataHeap();
+runtime/Heap.h:70:CodeHeapType* getCodeHeap();
+runtime/Function.cpp:18:        getDataHeap()->free(_stackPad);
+runtime/Function.cpp:46:                    _stackPad = (uint8_t*)getDataHeap()->malloc(1);
+runtime/libstabilizer.cpp:167:        return getDataHeap()->malloc(sz);
+runtime/libstabilizer.cpp:171:        return getDataHeap()->calloc(n, sz);
+runtime/libstabilizer.cpp:175:        return getDataHeap()->realloc(p, sz);
+runtime/libstabilizer.cpp:179:        if(getDataHeap()->getSize(p) == 0) {
+runtime/libstabilizer.cpp:182:            getDataHeap()->free(p);
+runtime/FunctionLocation.h:36:    FunctionLocation(Function* f) :  _f(f), _memory(getCodeHeap()->malloc(_f->getAllocationSize()), _f->getAllocationSize()) {
+runtime/FunctionLocation.h:56:        getCodeHeap()->free(_memory.base());
+runtime/FunctionLocation.h:64:        return getDataHeap()->malloc(sz);
+runtime/FunctionLocation.h:72:        getDataHeap()->free(p);
+runtime/Function.h:85:        return getDataHeap()->malloc(sz);
+runtime/Function.h:93:        getDataHeap()->free(p);
+runtime/Heap.cpp:3:DataHeapType* getDataHeap() {
+runtime/Heap.cpp:4:    static char buf[sizeof(DataHeapType)];
+runtime/Heap.cpp:5:    static DataHeapType* _theDataHeap = new (buf) DataHeapType;
+runtime/Heap.cpp:9:CodeHeapType* getCodeHeap() {
+runtime/Heap.cpp:10:    static char buf[sizeof(CodeHeapType)];
+runtime/Heap.cpp:11:    static CodeHeapType* _theCodeHeap = new (buf) CodeHeapType;
+grep: ./libstabilizer.a: binary file matches
+grep: ./runtime/obj/libstabilizer.o: binary file matches
+./.git/logs/refs/heads/master:3:f9ed534b1d653c15955c02aabc1f36d57194759b 29afeef8791956259ce8a53928a52634fcb31a3c Matthias Goergens <matthias.goergens@gmail.com> 1786093396 +0800	commit: runtime: fix getRandomByte() never resetting its read cursor
+./.git/logs/refs/heads/master:5:19137a3ec44d4695990492d186d058a0f27c9ff0 24df7010587031bfbcbca9d4a52857b350b0e1de Matthias Goergens <matthias.goergens@gmail.com> 1786101102 +0800	commit: runtime: initialise getRandomByte()'s _randCount to refill on first call
+./.git/logs/HEAD:3:f9ed534b1d653c15955c02aabc1f36d57194759b 29afeef8791956259ce8a53928a52634fcb31a3c Matthias Goergens <matthias.goergens@gmail.com> 1786093396 +0800	commit: runtime: fix getRandomByte() never resetting its read cursor
+./.git/logs/HEAD:5:19137a3ec44d4695990492d186d058a0f27c9ff0 24df7010587031bfbcbca9d4a52857b350b0e1de Matthias Goergens <matthias.goergens@gmail.com> 1786101102 +0800	commit: runtime: initialise getRandomByte()'s _randCount to refill on first call
+./runtime/Function.cpp:83:        *_stackPad = getRandomByte();
+./runtime/libstabilizer.cpp:245:            **iter = getRandomByte();
+grep: ./runtime/obj/Function.o: binary file matches
+grep: ./libstabilizer.so: binary file matches
+./runtime/Util.h:37:static inline uint8_t getRandomByte() {
+
+exec
+/bin/bash -lc "sed -n '1,140p' runtime/Heap.h
+sed -n '1,130p' DieHard/src/include/shuffleheap.h
+sed -n '80,210p' DieHard/src/util/kingsleyheap.h
+sed -n '1,140p' runtime/Heap.cpp
+sed -n '1,120p' runtime/Util.h
+git show 2bffc191c97008cc8ae99efbd801d8d609ce55d8:runtime/Heap.h
+git show 2bffc191c97008cc8ae99efbd801d8d609ce55d8:runtime/Util.h" in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 0ms:
+#if !defined(RUNTIME_HEAP_H)
+#define RUNTIME_HEAP_H
+
+#include <heaplayers>
+#include <shuffleheap.h>
+
+#include "Util.h"
+#include "MMapSource.h"
+
+enum {
+    DataShuffle = 256,
+    DataProt = PROT_READ | PROT_WRITE,
+    DataFlags = MAP_PRIVATE | MAP_ANONYMOUS,
+    DataSize = 0x2000000,
+    
+    CodeShuffle = 256,
+    CodeProt = PROT_READ | PROT_WRITE | PROT_EXEC,
+    CodeFlags = MAP_PRIVATE | MAP_ANONYMOUS,
+    CodeSize = 0x2000000
+};
+
+class DataSource : public SizeHeap<FreelistHeap<BumpAlloc<DataSize, MMapSource<DataProt, DataFlags>, 16> > > {};
+class CodeSource : public SizeHeap<FreelistHeap<BumpAlloc<CodeSize, MMapSource<CodeProt, CodeFlags>, CODE_ALIGN> > > {};
+    
+// Restore DieHard's shuffling layer for heap/code placement randomization.
+// Modern `ShuffleHeap` takes (ChunkSize, MaxSize, SuperHeap). We use a shuffled
+// KingsleyHeap, preserving the original `DataShuffle`/`CodeShuffle` tunables as
+// the maximum shuffled object size.
+
+// ShuffleHeap::malloc() bypasses its own shuffle buffer for requests bigger
+// than MaxSize, calling SuperHeap::malloc() (KingsleyHeap) directly. But
+// ShuffleHeap::free() has no matching bypass: it always computes a Kingsley
+// bin index for the pointer's real size and swaps it into that bin's
+// shuffle buffer -- even for bins malloc() never filled because every
+// request that size took the bypass. For any object over MaxSize bytes,
+// that swap pulls a null pointer out of a never-filled buffer slot and
+// hands it to SuperHeap::free(), which crashes reading its size header.
+// ShuffleFreeGuard restores malloc()'s bypass for free(), routing anything
+// over MaxSize straight to the unshuffled heap underneath ShuffleHeap
+// instead of through ShuffleHeap's shuffle bookkeeping.
+//
+// The code heap hits this on essentially every free(): FunctionLocation's
+// allocations (a whole function's code, plus its relocation table if
+// adjacent) are practically always well over CodeShuffle=256 bytes, so
+// FunctionLocation::~FunctionLocation's getCodeHeap()->free() goes through
+// the same never-filled-bin swap as the data heap's realloc() did (gdb
+// confirmed: reqSz=4096, binIndex=9, ptr swapped to 0x0 at the
+// StrictSegHeap::free call, same as the -Rheap crash). Guard both heaps.
+template <size_t MaxSize, class ShuffledHeap, class UnshuffledHeap>
+class ShuffleFreeGuard : public ShuffledHeap {
+public:
+    inline void free(void* ptr) {
+        // ANSIWrapper already filters NULL on the public path; this guard
+        // keeps the class safe if it is ever composed without the wrapper.
+        if (ptr == nullptr) {
+            return;
+        }
+        if (ShuffledHeap::getSize(ptr) > MaxSize) {
+            UnshuffledHeap::free(ptr);
+        } else {
+            ShuffledHeap::free(ptr);
+        }
+    }
+};
+
+typedef ANSIWrapper<ShuffleFreeGuard<DataShuffle, ShuffleHeap<4096, DataShuffle, KingsleyHeap<DataSource, DataSource> >, KingsleyHeap<DataSource, DataSource> > > DataHeapType;
+typedef ANSIWrapper<ShuffleFreeGuard<CodeShuffle, ShuffleHeap<4096, CodeShuffle, KingsleyHeap<CodeSource, CodeSource> >, KingsleyHeap<CodeSource, CodeSource> > > CodeHeapType;
+    
+DataHeapType* getDataHeap();
+CodeHeapType* getCodeHeap();
+
+#endif
+// -*- C++ -*-
+
+#ifndef DH_SHUFFLEHEAP_H
+#define DH_SHUFFLEHEAP_H
+
+#include <algorithm>
+#include <stdlib.h>
+
+#include "array.h"
+//#include "modulo.h"
+#include "randomnumbergenerator.h"
+
+template <size_t ChunkSize,
+	  size_t MaxSize,
+	  class SuperHeap>
+class ShuffleHeap : public SuperHeap {
+public:
+
+  ShuffleHeap()
+  {
+    for (auto i = 0; i < NumBins; i++) {
+      _is_filled[i] = false;
+    }
+  }
+
+  inline void * malloc (size_t sz) {
+    if (sz > MaxSize) {
+      return SuperHeap::malloc(sz);
+    }
+    auto binIndex = SuperHeap::get_size_class(sz);
+    auto reqSz = SuperHeap::get_class_size(binIndex);
+    if (!_is_filled[binIndex]) {
+      fill(binIndex);
+      _is_filled[binIndex] = true;
+    }
+    // Get an item from the superheap and swap it with a
+    // randomly-chosen object from the array. This is one step of an
+    // in-place Fisher-Yates shuffle.
+    void * ptr = SuperHeap::malloc(reqSz);
+    int j = _rng.next() % (ChunkSize / reqSz);
+    swap (_buffer[binIndex](j), ptr);
+    return ptr;
+  }
+
+
+  inline void free (void * ptr) {
+    // Choose a random item and evict it to the superheap,
+    // replacing it with the one we are now freeing.
+    auto reqSz = SuperHeap::getSize(ptr);
+    auto binIndex = SuperHeap::get_size_class(reqSz);
+    int j = _rng.next() % (ChunkSize / reqSz);
+    swap (_buffer[binIndex](j), ptr);
+    SuperHeap::free(ptr);
+  }
+
+ 
+private:
+
+  void fill (int index) {
+    const auto reqSz = SuperHeap::get_class_size(index);
+    const auto NObjects = ChunkSize / reqSz;
+    // Fill up the buffer from the superheap.
+    for (int i = 0; i < NObjects; i++) {
+      _buffer[index](i) = SuperHeap::malloc(reqSz);
+    }
+#if 0
+    // Now shuffle it (Fisher-Yates).
+    for (int i = NObjects - 1; i >= 1; i--) {
+      // Pick a random integer, 0 ≤ j ≤ i, and swap with item i.
+      int j = _rng.next() % (i+1);
+      swap (_buffer(i), _buffer(j));
+    }
+#endif
+  }
+
+
+  static auto constexpr NumBins = ChunkSize / 8;
+  
+  bool _is_filled[NumBins];
+  
+  /// The random number generator, used for shuffling and random selection.
+  RandomNumberGenerator 	_rng;
+
+  /// The buffer used to hold shuffled objects for heap requests.
+  Array<ChunkSize / 8, void *> 	_buffer[NumBins];
+
+};
+
+
+#endif
+};
+
+/**
+ * @class KingsleyHeap
+ * @brief The Kingsley-style allocator.
+ * @param PerClassHeap The heap to use for each size class.
+ * @param BigHeap The heap for "large" objects.
+ * @see Kingsley
+ */
+
+namespace HL {
+
+template <class PerClassHeap, class BigHeap>
+  class KingsleyHeap : 
+   public StrictSegHeap<Kingsley::NUMBINS,
+			Kingsley::size2Class,
+			Kingsley::class2Size,
+			PerClassHeap,
+			BigHeap> {};
+
+};
+
+#endif
+#include "Heap.h"
+
+DataHeapType* getDataHeap() {
+    static char buf[sizeof(DataHeapType)];
+    static DataHeapType* _theDataHeap = new (buf) DataHeapType;
+    return _theDataHeap;
+}
+
+CodeHeapType* getCodeHeap() {
+    static char buf[sizeof(CodeHeapType)];
+    static CodeHeapType* _theCodeHeap = new (buf) CodeHeapType;
+    return _theCodeHeap;
+}
+#ifndef RUNTIME_UTIL_H
+#define RUNTIME_UTIL_H
+
+#include <stdint.h>
+#include <sys/mman.h>
+#include <randomnumbergenerator.h>
+
+#include "Arch.h"
+
+#ifndef PAGESIZE
+#define PAGESIZE 4096
+#endif
+
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+
+#ifndef MAP_32BIT
+#define MAP_32BIT 0
+#endif
+
+#if !defined(CODE_ALIGN)
+#define CODE_ALIGN 32
+#endif
+
+static void flush_icache(void* begin, size_t size) {
+    _PPC(
+        uintptr_t p = (uintptr_t)begin & ~15UL;
+        for (size_t i = 0; i < size; i += 16) {
+            asm("icbi 0,%0" : : "r"(p));
+            p += 16;
+        }
+        asm("isync");
+    )
+}
+
+static inline uint8_t getRandomByte() {
+    static RandomNumberGenerator _rng;
+    static uint8_t _randCount = sizeof(int);
+    
+    static union {
+        uint8_t _rands[sizeof(int)];
+        int _bigRand;
+    };
+    
+    if(_randCount == sizeof(int)) {
+        _bigRand = _rng.next();
+        _randCount = 0;
+    }
+    
+    uint8_t r = _rands[_randCount];
+    _randCount++;
+    return r;
+}
+
+#endif
+#if !defined(RUNTIME_HEAP_H)
+#define RUNTIME_HEAP_H
+
+#include <heaplayers>
+#include <shuffleheap.h>
+
+#include "Util.h"
+#include "MMapSource.h"
+
+enum {
+    DataShuffle = 256,
+    DataProt = PROT_READ | PROT_WRITE,
+    DataFlags = MAP_PRIVATE | MAP_ANONYMOUS,
+    DataSize = 0x2000000,
+    
+    CodeShuffle = 256,
+    CodeProt = PROT_READ | PROT_WRITE | PROT_EXEC,
+    CodeFlags = MAP_PRIVATE | MAP_ANONYMOUS,
+    CodeSize = 0x2000000
+};
+
+class DataSource : public SizeHeap<FreelistHeap<BumpAlloc<DataSize, MMapSource<DataProt, DataFlags>, 16> > > {};
+class CodeSource : public SizeHeap<FreelistHeap<BumpAlloc<CodeSize, MMapSource<CodeProt, CodeFlags>, CODE_ALIGN> > > {};
+    
+// Restore DieHard's shuffling layer for heap/code placement randomization.
+// Modern `ShuffleHeap` takes (ChunkSize, MaxSize, SuperHeap). We use a shuffled
+// KingsleyHeap, preserving the original `DataShuffle`/`CodeShuffle` tunables as
+// the maximum shuffled object size.
+typedef ANSIWrapper<ShuffleHeap<4096, DataShuffle, KingsleyHeap<DataSource, DataSource> > > DataHeapType;
+typedef ANSIWrapper<ShuffleHeap<4096, CodeShuffle, KingsleyHeap<CodeSource, CodeSource> > > CodeHeapType;
+    
+DataHeapType* getDataHeap();
+CodeHeapType* getCodeHeap();
+
+#endif
+#ifndef RUNTIME_UTIL_H
+#define RUNTIME_UTIL_H
+
+#include <stdint.h>
+#include <sys/mman.h>
+#include <randomnumbergenerator.h>
+
+#include "Arch.h"
+
+#ifndef PAGESIZE
+#define PAGESIZE 4096
+#endif
+
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+
+#ifndef MAP_32BIT
+#define MAP_32BIT 0
+#endif
+
+#if !defined(CODE_ALIGN)
+#define CODE_ALIGN 32
+#endif
+
+static void flush_icache(void* begin, size_t size) {
+    _PPC(
+        uintptr_t p = (uintptr_t)begin & ~15UL;
+        for (size_t i = 0; i < size; i += 16) {
+            asm("icbi 0,%0" : : "r"(p));
+            p += 16;
+        }
+        asm("isync");
+    )
+}
+
+static inline uint8_t getRandomByte() {
+    static RandomNumberGenerator _rng;
+    static uint8_t _randCount = 0;
+    
+    static union {
+        uint8_t _rands[sizeof(int)];
+        int _bigRand;
+    };
+    
+    if(_randCount == sizeof(int)) {
+        _bigRand = _rng.next();
+        _randCount = sizeof(int);
+    }
+    
+    uint8_t r = _rands[_randCount];
+    _randCount++;
+    return r;
+}
+
+#endif
+
+exec
+/bin/bash -lc "grep -R \"class2Size\\|size2Class\\|NUMBINS\" -n Heap-Layers DieHard/src | head -100
+grep -R \"class ANSIWrapper\" -n Heap-Layers DieHard/src
+sed -n '1,220p' DieHard/src/util/strictsegheap.h
+sed -n '1,180p' DieHard/src/util/ansiwrapper.h" in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ exited 2 in 0ms:
+Heap-Layers/heaps/general/kingsleyheap.h:36:  inline size_t class2Size (const int i) {
+Heap-Layers/heaps/general/kingsleyheap.h:41:  inline int size2Class (const size_t sz) {
+Heap-Layers/heaps/general/kingsleyheap.h:46:  enum { NUMBINS = 29 };
+Heap-Layers/heaps/general/kingsleyheap.h:62:   public StrictSegHeap<Kingsley::NUMBINS,
+Heap-Layers/heaps/general/kingsleyheap.h:63:                        Kingsley::size2Class,
+Heap-Layers/heaps/general/kingsleyheap.h:64:                        Kingsley::class2Size,
+Heap-Layers/heaps/general/oldkingsleyheap.h:37:  size_t class2Size (const int i);
+Heap-Layers/heaps/general/oldkingsleyheap.h:56:  inline int size2Class (const size_t sz) {
+Heap-Layers/heaps/general/oldkingsleyheap.h:68:      assert (class2Size(cl[sz >> 3]) >= sz);
+Heap-Layers/heaps/general/oldkingsleyheap.h:81:      assert (class2Size(c) >= sz);
+Heap-Layers/heaps/general/oldkingsleyheap.h:88:  inline size_t class2Size (const int i) {
+Heap-Layers/heaps/general/oldkingsleyheap.h:92:  enum { NUMBINS = 29 };
+Heap-Layers/heaps/general/oldkingsleyheap.h:108:   public StrictSegHeap<Kingsley::NUMBINS,
+Heap-Layers/heaps/general/oldkingsleyheap.h:109:                        Kingsley::size2Class,
+Heap-Layers/heaps/general/oldkingsleyheap.h:110:                        Kingsley::class2Size,
+Heap-Layers/heaps/general/dlheap.h:247:  enum { NUMBINS = sizeof(bins) / sizeof(size_t) };
+Heap-Layers/heaps/general/dlheap.h:268:    assert (i < NUMBINS);
+Heap-Layers/heaps/general/dlheap.h:319:  enum { NUMBINS = 8 };
+Heap-Layers/heaps/general/dlheap.h:325:    assert (i < NUMBINS);
+Heap-Layers/heaps/general/dlheap.h:344:  SegHeap<Kingsley::NUMBINS,
+Heap-Layers/heaps/general/dlheap.h:345:          Kingsley::size2Class,
+Heap-Layers/heaps/general/dlheap.h:346:          Kingsley::class2Size,
+Heap-Layers/heaps/general/dlheap.h:357:  SegHeap<DLBigHeapNS::NUMBINS,
+Heap-Layers/heaps/general/dlheap.h:375:  StrictSegHeap<DLSmallHeapNS::NUMBINS,
+DieHard/src/util/kingsleyheap.h:23:  size_t class2Size (const int i);
+DieHard/src/util/kingsleyheap.h:42:  inline int size2Class (const size_t sz) {
+DieHard/src/util/kingsleyheap.h:54:      assert (class2Size(cl[sz >> 3]) >= sz);
+DieHard/src/util/kingsleyheap.h:67:      assert (class2Size(c) >= sz);
+DieHard/src/util/kingsleyheap.h:74:  inline size_t class2Size (const int i) {
+DieHard/src/util/kingsleyheap.h:78:  enum { NUMBINS = 29 };
+DieHard/src/util/kingsleyheap.h:94:   public StrictSegHeap<Kingsley::NUMBINS,
+DieHard/src/util/kingsleyheap.h:95:			Kingsley::size2Class,
+DieHard/src/util/kingsleyheap.h:96:			Kingsley::class2Size,
+DieHard/src/exterminator/src/util/kingsleyheap.h:23:  size_t class2Size (const int i);
+DieHard/src/exterminator/src/util/kingsleyheap.h:42:  inline int size2Class (const size_t sz) {
+DieHard/src/exterminator/src/util/kingsleyheap.h:54:      assert (class2Size(cl[sz >> 3]) >= sz);
+DieHard/src/exterminator/src/util/kingsleyheap.h:67:      assert (class2Size(c) >= sz);
+DieHard/src/exterminator/src/util/kingsleyheap.h:74:  inline size_t class2Size (const int i) {
+DieHard/src/exterminator/src/util/kingsleyheap.h:78:  enum { NUMBINS = 29 };
+DieHard/src/exterminator/src/util/kingsleyheap.h:94:   public StrictSegHeap<Kingsley::NUMBINS,
+DieHard/src/exterminator/src/util/kingsleyheap.h:95:			Kingsley::size2Class,
+DieHard/src/exterminator/src/util/kingsleyheap.h:96:			Kingsley::class2Size,
+Heap-Layers/wrappers/ansiwrapper.h:19: * @class ANSIWrapper
+Heap-Layers/wrappers/ansiwrapper.h:29:  class ANSIWrapper : public SuperHeap {
+sed: can't read DieHard/src/util/strictsegheap.h: No such file or directory
+sed: can't read DieHard/src/util/ansiwrapper.h: No such file or directory
+
+exec
+/bin/bash -lc "sed -n '1,115p' DieHard/src/util/kingsleyheap.h
+sed -n '1,180p' Heap-Layers/heaps/general/strictsegheap.h
+sed -n '1,140p' Heap-Layers/wrappers/ansiwrapper.h
+sed -n '1,100p' Heap-Layers/heaps/general/kingsleyheap.h
+grep -R \"#define.*heaplayers\\|include.*kingsley\" -n DieHard/src/include Heap-Layers | head -80" in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 0ms:
+// -*- C++ -*-
+
+#ifndef DH_KINGSLEYHEAP_H_
+#define DH_KINGSLEYHEAP_H_
+
+#include "segheap.h"
+
+/**
+ * @file kingsleyheap.h
+ * @brief Classes to implement a Kingsley (power-of-two, segregated fits) allocator.
+ * @author Emery Berger <http://www.cs.umass.edu/~emery>
+ */
+
+/**
+ * @namespace Kingsley
+ * @brief Functions to implement KingsleyHeap.
+ */
+
+
+
+namespace Kingsley {
+
+  size_t class2Size (const int i);
+
+#if defined(__sparc) && defined(__GNUC__)
+  inline int popc (int v) {
+    int r;
+    asm volatile ("popc %1, %0"
+		  : "=r" (r)
+		  : "r" (v));
+    return r;
+  }
+#endif
+
+  /**
+   * A speed optimization:
+   * we use this array to quickly return the size class of objects
+   * from 8 to 128 bytes.
+   */
+  const int cl[16] = { 0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4 };
+
+  inline int size2Class (const size_t sz) {
+#if defined(__sparc) && defined(__GNUC__)
+    // Adapted from _Hacker's Delight_, by Henry Warren (p.80)
+    size_t x = sz;
+    x = x | (x >> 1);
+    x = x | (x >> 2);
+    x = x | (x >> 4);
+    x = x | (x >> 8);
+    x = x | (x >> 16);
+    return popc(x) - 3;
+#else
+    if (sz < 128 ) {
+      assert (class2Size(cl[sz >> 3]) >= sz);
+      return cl[(sz - 1) >> 3];
+    } else {
+      //
+      // We know that the object is more than 128 bytes long,
+      // so we can avoid iterating 5 times.
+      //
+      int c = 5;
+      size_t sz1 = ((sz - 1) >> 5);
+      while (sz1 > 7) {
+	sz1 >>= 1;
+	c++;
+      }
+      assert (class2Size(c) >= sz);
+      return c;
+    }
+#endif
+
+  }
+
+  inline size_t class2Size (const int i) {
+    return (size_t) (1 << (i+3));
+  }
+
+  enum { NUMBINS = 29 };
+
+};
+
+/**
+ * @class KingsleyHeap
+ * @brief The Kingsley-style allocator.
+ * @param PerClassHeap The heap to use for each size class.
+ * @param BigHeap The heap for "large" objects.
+ * @see Kingsley
+ */
+
+namespace HL {
+
+template <class PerClassHeap, class BigHeap>
+  class KingsleyHeap : 
+   public StrictSegHeap<Kingsley::NUMBINS,
+			Kingsley::size2Class,
+			Kingsley::class2Size,
+			PerClassHeap,
+			BigHeap> {};
+
+};
+
+#endif
+sed: can't read Heap-Layers/heaps/general/strictsegheap.h: No such file or directory
+/* -*- C++ -*- */
+
+#ifndef HL_ANSIWRAPPER_H
+#define HL_ANSIWRAPPER_H
+
+#include <assert.h>
+#include <string.h>
+#include <stddef.h>
+#include <cstdint>
+#include <climits>
+
+#ifndef _WIN32
+#include <stdalign.h>
+#endif
+
+#include "utility/cpp23compat.h"
+
+/*
+ * @class ANSIWrapper
+ * @brief Provide ANSI C behavior for malloc & free.
+ *
+ * Implements all prescribed ANSI behavior, including zero-sized
+ * requests & aligned request sizes to a double word (or long word).
+ */
+
+namespace HL {
+
+  template <class SuperHeap>
+  class ANSIWrapper : public SuperHeap {
+  private:
+    static constexpr int gcd(int a, int b) {
+      return (b == 0) ? a : gcd(b, a % b);
+    }
+
+  public:
+  
+    ANSIWrapper() {
+      static_assert(gcd(SuperHeap::Alignment, 8) == 8, "Alignment mismatch");
+    }
+    using SuperHeap::SuperHeap;
+
+    inline void * malloc (size_t sz) {
+#if !defined(HL_NO_MALLOC_SIZE_CHECKS)
+      static constexpr int alignment = 16; // safe for all platforms
+      if (HL_EXPECT_FALSE(sz < alignment)) HL_UNLIKELY {
+      	sz = alignment;
+      }
+      // Prevent integer underflows. This maximum should (and
+      // currently does) provide more than enough slack to compensate for any
+      // rounding below (in the alignment section).
+      if (HL_EXPECT_FALSE(sz >> (sizeof(size_t) * CHAR_BIT - 1))) HL_UNLIKELY {
+	return 0;
+      }
+      // Enforce alignment requirements: round up allocation sizes if needed.
+      // Enforce alignment.
+      sz = (sz + alignment - 1UL) &
+	~(alignment - 1UL);
+#endif
+      auto * ptr = SuperHeap::malloc (sz);
+      return ptr;
+    }
+ 
+    inline void free (void * ptr) {
+      if (HL_EXPECT_TRUE(ptr != 0)) HL_LIKELY {
+	SuperHeap::free (ptr);
+      }
+    }
+
+    inline void free_sized (void * ptr, size_t sz) {
+      if (HL_EXPECT_TRUE(ptr != 0)) HL_LIKELY {
+	SuperHeap::free_sized (ptr, sz);
+      }
+    }
+
+    inline void free_aligned_sized (void * ptr, size_t alignment, size_t sz) {
+      if (ptr != 0) {
+	SuperHeap::free_aligned_sized (ptr, alignment, sz);
+      }
+    }
+    
+    inline void * calloc (size_t s1, size_t s2) {
+      auto * ptr = (char *) malloc (s1 * s2);
+      if (HL_EXPECT_TRUE(ptr)) HL_LIKELY {
+      	memset (ptr, 0, s1 * s2);
+      }
+      return (void *) ptr;
+    }
+  
+    inline void * realloc (void * ptr, const size_t sz) {
+      if (HL_EXPECT_FALSE(ptr == 0)) HL_UNLIKELY {
+      	return malloc (sz);
+      }
+      if (HL_EXPECT_FALSE(sz == 0)) HL_UNLIKELY {
+      	free (ptr);
+      	return 0;
+      }
+
+      auto objSize = getSize (ptr);
+      if (objSize == sz) {
+    	return ptr;
+      }
+
+      // Allocate a new block of size sz.
+      auto * buf = malloc (sz);
+
+      // Copy the contents of the original object
+      // up to the size of the new block.
+
+      auto minSize = (objSize < sz) ? objSize : sz;
+      if (HL_EXPECT_TRUE(buf)) HL_LIKELY {
+	memcpy (buf, ptr, minSize);
+      }
+
+      // Free the old block.
+      free (ptr);
+      return buf;
+    }
+
+    inline size_t getSize (void * ptr) {
+      if (HL_EXPECT_TRUE(ptr)) HL_LIKELY {
+	return SuperHeap::getSize (ptr);
+      } else {
+	return 0;
+      }
+    }
+  };
+}
+
+#endif
+// -*- C++ -*-
+
+/*
+
+  Heap Layers: An Extensible Memory Allocation Infrastructure
+  
+  Copyright (C) 2000-2020 by Emery Berger
+  http://www.emeryberger.com
+  emery@cs.umass.edu
+  
+  Heap Layers is distributed under the terms of the Apache 2.0 license.
+
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+
+*/
+
+#ifndef HL_KINGSLEYHEAP_H
+#define HL_KINGSLEYHEAP_H
+
+#include "utility/ilog2.h"
+#include "heaps/combining/strictsegheap.h"
+
+/**
+ * @file kingsleyheap.h
+ * @brief Classes to implement a Kingsley (power-of-two, segregated fits) allocator.
+ */
+
+/**
+ * @namespace Kingsley
+ * @brief Functions to implement KingsleyHeap.
+ */
+
+namespace Kingsley {
+
+  inline size_t class2Size (const int i) {
+    auto sz = (size_t) (1ULL << (i+3));
+    return sz;
+  }
+
+  inline int size2Class (const size_t sz) {
+    auto cl = (int) HL::ilog2 ((sz < 8) ? 8 : sz) - 3;
+    return cl;
+  }
+
+  enum { NUMBINS = 29 };
+
+}
+
+/**
+ * @class KingsleyHeap
+ * @brief The Kingsley-style allocator.
+ * @param PerClassHeap The heap to use for each size class.
+ * @param BigHeap The heap for "large" objects.
+ * @see Kingsley
+ */
+
+namespace HL {
+
+template <class PerClassHeap, class BigHeap>
+  class KingsleyHeap :
+   public StrictSegHeap<Kingsley::NUMBINS,
+                        Kingsley::size2Class,
+                        Kingsley::class2Size,
+                        PerClassHeap,
+                        BigHeap> {};
+
+}
+
+#endif
+Heap-Layers/heaps/general/all.h:2:#include "kingsleyheap.h"
+Heap-Layers/heaps/general/dlheap.h:332:#include "kingsleyheap.h"
+
+exec
+/bin/bash -lc "sed -n '1,260p' Heap-Layers/heaps/combining/strictsegheap.h
+find . -maxdepth 3 -type f -iname '*test*' | head -80
+find . -maxdepth 2 -type f -name 'Makefile' -o -name 'CMakeLists.txt' -o -name 'README*'
+sed -n '1,260p' runtime/libstabilizer.cpp" in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 0ms:
+// -*- C++ -*-
+
+/*
+
+  Heap Layers: An Extensible Memory Allocation Infrastructure
+  
+  Copyright (C) 2000-2020 by Emery Berger
+  http://www.emeryberger.com
+  emery@cs.umass.edu
+  
+  Heap Layers is distributed under the terms of the Apache 2.0 license.
+
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+
+*/
+
+/**
+ * @file strictsegheap.h
+ * @brief Definition of StrictSegHeap.
+ */
+
+#ifndef HL_STRICTSEGHEAP_H
+#define HL_STRICTSEGHEAP_H
+
+#include "segheap.h"
+
+/**
+ * @class StrictSegHeap
+ * @brief A "strict" segregated-fits collection of (homogeneous) heaps.
+ *
+ * One extra heap is used for objects that are "too big".  Unlike
+ * SegHeap, StrictSegHeap does not perform splitting to satisfy memory
+ * requests. If no memory is available from the appropriate bin,
+ * malloc returns NULL.
+ *
+ * @sa SegHeap
+ *
+ * @param NumBins The number of bins (subheaps).
+ * @param getSizeClass Function to compute size class from size.
+ * @param getClassMaxSize Function to compute the largest size for a given size class.
+ * @param LittleHeap The subheap class.
+ * @param BigHeap The parent class, used for "big" objects.
+ */
+
+namespace HL {
+
+  template <int NumBins,
+	    int (*size2class) (const size_t),
+	    size_t (*class2size) (const int),
+	    class LittleHeap,
+	    class BigHeap>
+  class StrictSegHeap :
+    public SegHeap<NumBins, size2class, class2size, LittleHeap, BigHeap>
+  {
+  private:
+
+    typedef SegHeap<NumBins, size2class, class2size, LittleHeap, BigHeap> SuperHeap;
+
+  public:
+
+    static constexpr size_t num_size_classes = NumBins;
+    int get_size_class(const size_t sz) const { return size2class(sz); }
+    size_t get_class_size(int i) const { return class2size(i); }
+    
+    void clear () {
+      for (auto i = 0; i < NumBins; i++) {
+        const size_t sz = class2size(i);
+        void * ptr;
+        while ((ptr = SuperHeap::myLittleHeap[i].malloc (sz)) != NULL) {
+          SuperHeap::bigheap.free (ptr);
+        }
+      }
+      for (auto j = 0; j < SuperHeap::NUM_ULONGS; j++) {
+        SuperHeap::binmap[j] = 0;
+      }
+      SuperHeap::_memoryHeld = 0;
+    }
+
+    /**
+     * Malloc from exactly one available size.
+     * (don't look in every small heap, as in SegHeap).
+     */
+
+    inline void * malloc (const size_t sz) {
+      void * ptr = nullptr;
+      const auto sizeClass   = size2class(sz);
+      const auto realSize = class2size(sizeClass);
+
+      assert (realSize >= sz);
+      HL_ASSUME(realSize >= sz);
+
+      if (HL_EXPECT_TRUE(realSize <= SuperHeap::_maxObjectSize)) HL_LIKELY {
+        assert (sizeClass >= 0);
+        assert (sizeClass < NumBins);
+        HL_ASSUME(sizeClass >= 0);
+        HL_ASSUME(sizeClass < NumBins);
+        ptr = SuperHeap::myLittleHeap[sizeClass].malloc (realSize);
+      }
+      if (HL_EXPECT_FALSE(!ptr)) HL_UNLIKELY {
+        ptr = SuperHeap::bigheap.malloc (realSize);
+      }
+      return ptr;
+    }
+
+    inline void free (void * ptr) {
+      const auto objectSize = SuperHeap::getSize(ptr);
+      free(ptr, objectSize);
+    }
+
+    inline void free(void * ptr, size_t objectSize) {
+      if (HL_EXPECT_FALSE(objectSize > SuperHeap::_maxObjectSize)) HL_UNLIKELY {
+        SuperHeap::bigheap.free (ptr);
+      } else HL_LIKELY {
+        auto objectSizeClass = size2class(objectSize);
+        assert (objectSizeClass >= 0);
+        assert (objectSizeClass < NumBins);
+        assert (class2size(objectSizeClass) >= objectSize);
+        HL_ASSUME(objectSizeClass >= 0);
+        HL_ASSUME(objectSizeClass < NumBins);
+
+        // Put the freed object into the right sizeclass heap.
+	
+        // Ensure that the bin that we are going to put it in is for
+        // objects that are no bigger than the actual size of the
+        // object. Ensure we don't run forever.
+	
+        while ((objectSizeClass > 0) &&
+	       (class2size(objectSizeClass) > objectSize)) {
+	    objectSizeClass--;
+	}
+	// Leak objects if something went wrong.
+	if (class2size(objectSizeClass) >= objectSize) {
+	  SuperHeap::myLittleHeap[objectSizeClass].free (ptr);
+	}
+      }
+    }
+
+  };
+
+}
+
+#endif
+
+./Heap-Layers/utility/testalign.cpp
+./DieHard/tests/test_globalfreepool.cpp
+./DieHard/tests/test_remote_free.cpp
+./DieHard/tests/threadtest.cpp
+./DieHard/tests/test_doublefree.cpp
+./DieHard/tests/test_invalidfree.cpp
+./DieHard/demo/test.gif
+./Heap-Layers/README.md
+./Makefile
+./runtime/Makefile
+./pass/Makefile
+./README.md
+./tests/Makefile
+./DieHard/README.md
+./DieHard/CMakeLists.txt
+#include <set>
+#include <vector>
+#include <cmath>
+#include <signal.h>
+#include <cstdlib>
+#include <execinfo.h>
+#include <sys/time.h>
+
+#include "Function.h"
+#include "FunctionLocation.h"
+#include "Debug.h"
+#include "Heap.h"
+#include "CodeWindow.h"
+#include "Context.h"
+#include "TextRelocations.h"
+
+extern "C" int stabilizer_main(int argc, char **argv);
+
+int main(int argc, char** argv);
+
+void onTrap(int sig, siginfo_t* info, void*);
+void onTimer(int sig, siginfo_t* info, void*);
+void onFault(int sig, siginfo_t* info, void*);
+
+void setTimer(int msec);
+void setHandler(int sig, void(*fn)(int, siginfo_t*, void*));
+
+typedef void(*ctor_t)();
+
+std::set<Function*> functions;
+std::set<Function*> live_functions;
+std::set<uint8_t*> stack_pads;
+std::vector<ctor_t> constructors;
+
+bool rerandomizing = false;
+size_t interval = 500;
+
+void** topFrame = NULL;
+
+/**
+ * Entry point for a program run with Stabilizer.  The program's existing
+ * main function has been renamed 'stabilizer_main' by the compiler pass.
+ *
+ * 1. Save the current top of the stack
+ * 2. Set signal handlers for debug traps, timers, and segfaults for error handling
+ * 3. Place a trap instruction at the start of each randomizable function to trigger relocation on-demand
+ * 4. Set the re-randomization timer
+ * 5. Call module constructors
+ * 6. Invoke stabilizer_main
+ */
+int main(int argc, char **argv) {
+    DEBUG("Initializing Stabilizer");
+
+    topFrame = (void**)__builtin_frame_address(0);
+    DEBUG("Stack top is at %p", topFrame);
+
+    // Register signal handlers
+    setHandler(Trap::TrapSignal, onTrap);
+    setHandler(SIGALRM, onTimer);
+    setHandler(SIGSEGV, onFault);
+    DEBUG("Signal handlers installed");
+
+#if !(defined(__linux__) && defined(__x86_64__))
+    if(!functions.empty()) {
+        ABORT("Code randomization (-Rcode) requires ELF text relocation fixups, which are currently only implemented on Linux x86_64. Disable -Rcode.");
+    }
+#endif
+
+    // If code randomization is enabled, we must ensure relocated code stays
+    // within range of x86_64 pc-relative relocations (signed 32-bit).
+    if(!functions.empty()) {
+        uintptr_t min_addr = (uintptr_t)-1;
+        uintptr_t max_addr = 0;
+
+        for(Function* f : functions) {
+            uintptr_t base = (uintptr_t)f->getCodeBase();
+            uintptr_t end = base + (uintptr_t)f->getCodeSize();
+
+            if(base < min_addr) {
+                min_addr = base;
+            }
+            if(end > max_addr) {
+                max_addr = end;
+            }
+        }
+
+        const uintptr_t ONE_GB = (uintptr_t)1 << 30;
+        const uintptr_t TWO_GB = (uintptr_t)1 << 31;
+
+        // If the randomized text span itself exceeds the pc-relative reach,
+        // we cannot safely relocate without more invasive rewriting.
+        if(max_addr < min_addr || (max_addr - min_addr) >= TWO_GB) {
+            ABORT("Executable text span too large for 32-bit pc-relative relocations (span=%zu bytes, [%p, %p)). Code randomization requires all randomized code to fit within a 2GB window. Disable -Rcode.",
+                (size_t)(max_addr - min_addr), (void*)min_addr, (void*)max_addr);
+        }
+
+        uintptr_t span = max_addr - min_addr;
+        uintptr_t center = min_addr + span / 2;
+
+        uintptr_t lo = (center > ONE_GB) ? (center - ONE_GB) : 0;
+        uintptr_t hi = (center > (uintptr_t)-1 - ONE_GB) ? (uintptr_t)-1 : (center + ONE_GB);
+
+        // Align to pages.
+        uintptr_t mask = ~((uintptr_t)PAGESIZE - 1u);
+        lo &= mask;
+        hi &= mask;
+
+        if(hi > lo) {
+            stabilizer_set_code_window(lo, hi);
+            DEBUG("Code allocation window: [%p, %p)", (void*)lo, (void*)hi);
+        }
+    }
+
+    // Pre-compute relocation fixups for randomized code.
+    // Code randomization requires ELF text relocations (link with --emit-relocs).
+    if(!functions.empty()) {
+        if(!stabilizer_init_text_relocations(functions)) {
+          ABORT("Unable to initialize ELF text relocations required for code "
+                "randomization. This requires Linux x86_64, reading "
+                "/proc/self/exe, and linking with -Wl,--emit-relocs (szc adds "
+                "this automatically for -Rcode). If unsupported relocation "
+                "types are encountered inside randomized functions, Stabilizer "
+                "will ABORT with a separate diagnostic. Rebuild without -Rcode "
+                "if you cannot provide relocations.");
+        }
+    }
+
+    // Lazily relocate functions
+    for(std::set<Function*>::iterator iter = functions.begin(); iter != functions.end(); iter++) {
+        Function* f = *iter;
+        f->setTrap();
+    }
+    DEBUG("Trapped all functions");
+
+    // Set the re-randomization timer
+    setTimer(interval);
+    DEBUG("Set re-randomization timer");
+
+    // Call all constructors
+    for(std::vector<ctor_t>::iterator i = constructors.begin(); i != constructors.end(); i++) {
+        (*i)();
+    }
+    DEBUG("Finished with program constructors");
+
+    // Call the old main function
+    int r = stabilizer_main(argc, argv);
+    DEBUG("Shutting down");
+
+    return r;
+}
+
+extern "C" {
+    void stabilizer_register_function(void* codeBase, void* codeLimit, void* tableBase, size_t tableSize, bool adjacent, uint8_t* stackPad) {
+        Function* f = new Function(codeBase, codeLimit, tableBase, tableSize, adjacent, stackPad);
+        functions.insert(f);
+    }
+
+    void stabilizer_register_constructor(ctor_t ctor) {
+        constructors.push_back(ctor);
+    }
+
+    void stabilizer_register_stack_pad(uint8_t* pad) {
+        stack_pads.insert(pad);
+    }
+
+    void* stabilizer_malloc(size_t sz) {
+        return getDataHeap()->malloc(sz);
+    }
+
+    void* stabilizer_calloc(size_t n, size_t sz) {
+        return getDataHeap()->calloc(n, sz);
+    }
+
+    void* stabilizer_realloc(void *p, size_t sz) {
+        return getDataHeap()->realloc(p, sz);
+    }
+
+    void stabilizer_free(void *p) {
+        if(getDataHeap()->getSize(p) == 0) {
+            free(p);
+        } else {
+            getDataHeap()->free(p);
+        }
+    }
+
+    void reportDoubleFreeError() {
+        ABORT("Double free error");
+    }
+}
+
+void onTrap(int sig, siginfo_t* info, void* p) {
+    Context c(p);
+
+    // Back up over the trap instruction
+    c.ip() = (void*)((uintptr_t)c.ip() - Trap::TrapAdjust);
+
+    // Extract the trapped function (stored next to the trap instruction)
+    FunctionHeader* h = (FunctionHeader*)c.ip();
+    Function* f = h->getFunction();
+
+    // If the trap was placed to trigger a re-randomization
+    if(rerandomizing) {
+        DEBUG("Re-randomization started after trap on %p", c.ip());
+
+        // Mark all on-stack function locations as used
+        Stack s = c.stack();
+        while(s.fp() != topFrame) {
+            FunctionLocation::mark(s.ret());
+            s++;
+        }
+
+        // Mark the current instruction pointer as used
+        FunctionLocation::mark((void*)c.ip());
+
+        // Mark the top return address on the stack as used
+        FunctionLocation::mark(*(void**)c.sp());
+
+        // Collect unused function locations
+        FunctionLocation::sweep();
+
+        rerandomizing = false;
+        setTimer(interval);
+    }
+
+    // Relocate the function
+    FunctionLocation* oldLocation = f->relocate();
+    live_functions.insert(f);
+
+    if(oldLocation != NULL) {
+        oldLocation->release();
+    }
+
+    c.ip() = f->getCurrentLocation()->getBase();
+}
+
+void onTimer(int sig, siginfo_t* info, void* p) {
+    Context c(p);
+
+    DEBUG("Re-randomization timer fired at %p", c.ip());
+
+    if(functions.size() == 0) {
+        DEBUG("Re-randomizing stack pads");
+        for(std::set<uint8_t*>::iterator iter = stack_pads.begin(); iter != stack_pads.end(); iter++) {
+            uint8_t* pad = *iter;
+            **iter = getRandomByte();
+        }
+
+        setTimer(interval);
+
+    } else {
+        DEBUG("Placing traps");
+        for(std::set<Function*>::iterator iter = live_functions.begin(); iter != live_functions.end(); iter++) {
+            Function* f = *iter;
+            if(c.ip() == f->getCodeBase()) {
+                DEBUG("Forwarding from trap at %p", c.ip());
+                c.ip() = f->getCurrentLocation()->getBase();
+            }
+            f->setTrap();
+        }
+
+
+exec
+/bin/bash -lc "sed -n '1,150p' Heap-Layers/utility/ilog2.h
+sed -n '1,200p' Heap-Layers/heaps/combining/segheap.h
+sed -n '1,180p' runtime/Makefile
+sed -n '1,160p' Makefile
+nl -ba runtime/Heap.h | sed -n '45,75p'
+nl -ba runtime/Util.h | sed -n '30,60p'" in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 0ms:
+// -*- C++ -*-
+
+/*
+
+  Heap Layers: An Extensible Memory Allocation Infrastructure
+  
+  Copyright (C) 2000-2020 by Emery Berger
+  http://www.emeryberger.com
+  emery@cs.umass.edu
+  
+  Heap Layers is distributed under the terms of the Apache 2.0 license.
+
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+
+*/
+
+#ifndef HL_ILOG2_H
+#define HL_ILOG2_H
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
+namespace HL {
+
+  /// Quickly calculate the CEILING of the log (base 2) of the argument.
+#if defined(_WIN32)
+  static inline unsigned int ilog2 (size_t sz)
+  {
+    DWORD index;
+    _BitScanReverse (&index, sz);
+    if (!(sz & (sz-1))) {
+      return index;
+    } else {
+      return index+1;
+    }
+  }
+#elif defined(__GNUC__)
+  // Just use the intrinsic.
+  static constexpr inline unsigned int ilog2 (const size_t sz)
+  {
+    return ((unsigned int) (sizeof(size_t) * 8UL) - (unsigned int) __builtin_clzl((sz << 1) - 1UL) - 1);
+  }
+#else
+#error "Could not find an efficient implementation of log2."
+  static constexpr inline unsigned int ilog2 (size_t v) {
+    int log = 0;
+    unsigned int value = 1;
+    while (value < v) {
+      value <<= 1;
+      log++;
+    }
+    return log;
+  }
+#endif
+
+
+}
+
+#endif
+// -*- C++ -*-
+
+/*
+
+  Heap Layers: An Extensible Memory Allocation Infrastructure
+  
+  Copyright (C) 2000-2020 by Emery Berger
+  http://www.emeryberger.com
+  emery@cs.umass.edu
+  
+  Heap Layers is distributed under the terms of the Apache 2.0 license.
+
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+
+*/
+
+/**
+ * @file segheap.h
+ * @brief Definition of SegHeap.
+ */
+
+#ifndef HL_SEGHEAP_H
+#define HL_SEGHEAP_H
+
+/**
+ * @class SegHeap
+ * @brief A segregated-fits collection of (homogeneous) heaps.
+ * @author Emery Berger
+ *
+ * Note that one extra heap is used for objects that are "too big".
+ *
+ * @param NumBins The number of bins (subheaps).
+ * @param getSizeClass Function to compute size class from size.
+ * @param getClassMaxSize Function to compute the largest size for a given size class.
+ * @param LittleHeap The subheap class.
+ * @param BigHeap The parent class, used for "big" objects.
+ *
+ * Example:<BR>
+ * <TT>
+ *  int myFunc (size_t sz); // The size-to-class function.<BR>
+ *  size_t myFunc2 (int); // The class-to-size function.<P>
+ *  // The heap. Use freelists for these small objects,<BR>
+ *  // but defer to malloc for large objects.<P>
+ *
+ * SegHeap<4, myFunc, myFunc2, freelistHeap<MallocHeap>, MallocHeap> mySegHeap;
+ * </TT>
+ **/
+
+#include <assert.h>
+
+#include "utility/gcd.h"
+#include "utility/cpp23compat.h"
+
+namespace HL {
+
+  template <int NumBins,
+	    int (*getSizeClass) (const size_t),
+	    size_t (*getClassMaxSize) (const int),
+	    class LittleHeap,
+	    class BigHeap>
+  class SegHeap : public LittleHeap {
+  public:
+
+    enum { Alignment = gcd<LittleHeap::Alignment, BigHeap::Alignment>::VALUE };
+
+    static constexpr size_t num_size_classes = NumBins;
+    int get_size_class(const size_t sz) const { return getSizeClass(sz); }
+    size_t get_class_size(int i) const { return getClassMaxSize(i); }
+    
+    inline SegHeap()
+      : _memoryHeld (0),
+	_maxObjectSize (getClassMaxSize(NumBins - 1))
+    {
+      for (int i = 0; i < NUM_ULONGS; i++) {
+        binmap[i] = 0;
+      }
+    }
+
+    inline size_t getMemoryHeld() const {
+      return _memoryHeld;
+    }
+
+    size_t getSize (void * ptr) {
+      return LittleHeap::getSize (ptr);
+    }
+
+    inline void * malloc (const size_t sz) {
+      void * ptr = nullptr;
+      if (HL_EXPECT_FALSE(sz > _maxObjectSize)) HL_UNLIKELY {
+        goto GET_MEMORY;
+      }
+
+      {
+        const auto sc = getSizeClass(sz);
+        assert (sc >= 0);
+        assert (sc < NumBins);
+        HL_ASSUME(sc >= 0);
+        HL_ASSUME(sc < NumBins);
+        auto idx = sc;
+        auto block = idx2block (idx);
+        unsigned long map = binmap[block];
+        unsigned long bit = idx2bit (idx);
+
+        for (;;) {
+          if (bit > map || bit == 0) {
+            do {
+              if (++block >= NUM_ULONGS) {
+                goto GET_MEMORY;
+                // return bigheap.malloc (sz);
+              }
+            } while ( (map = binmap[block]) == 0);
+
+            idx = block << SHIFTS_PER_ULONG;
+            bit = 1;
+          }
+
+          while ((bit & map) == 0) {
+            bit <<= 1;
+            assert(bit != 0);
+            idx++;
+          }
+
+          assert (idx < NumBins);
+          ptr = myLittleHeap[idx].malloc (sz);
+
+          if (ptr == NULL) {
+            binmap[block] = map &= ~bit; // Write through
+            idx++;
+            bit <<= 1;
+          } else {
+	    _memoryHeld -= sz;
+            return ptr;
+          }
+        }
+      }
+
+      GET_MEMORY:
+      if (ptr == NULL) {
+        // There was no free memory in any of the bins.
+        // Get some memory.
+        ptr = bigheap.malloc (sz);
+      }
+
+      return ptr;
+    }
+
+
+    inline void free (void * ptr) {
+      // printf ("Free: %x (%d bytes)\n", ptr, getSize(ptr));
+      const auto objectSize = getSize(ptr); // was bigheap.getSize(ptr)
+      if (HL_EXPECT_FALSE(objectSize > _maxObjectSize)) HL_UNLIKELY {
+        bigheap.free (ptr);
+      } else HL_LIKELY {
+        auto objectSizeClass = getSizeClass(objectSize);
+        assert (objectSizeClass >= 0);
+        assert (objectSizeClass < NumBins);
+        HL_ASSUME(objectSizeClass >= 0);
+        HL_ASSUME(objectSizeClass < NumBins);
+        // Put the freed object into the right sizeclass heap.
+        assert (getClassMaxSize(objectSizeClass) >= objectSize);
+#if 1
+        while (getClassMaxSize(objectSizeClass) > objectSize) {
+          objectSizeClass--;
+        }
+#endif
+        assert (getClassMaxSize(objectSizeClass) <= objectSize);
+        if (objectSizeClass > 0) {
+          assert (objectSize >= getClassMaxSize(objectSizeClass - 1));
+        }
+
+        myLittleHeap[objectSizeClass].free (ptr);
+        mark_bin (objectSizeClass);
+        _memoryHeld += objectSize;
+      }
+    }
+
+
+    void clear() {
+      for (auto i = 0; i < NumBins; i++) {
+        myLittleHeap[i].clear();
+      }
+      for (auto j = 0; j < NUM_ULONGS; j++) {
+        binmap[j] = 0;
+      }
+      bigheap.clear();
+      _memoryHeld = 0;
+    }
+
+  private:
+
+    enum { BITS_PER_ULONG = sizeof(unsigned long) * 8 };
+    enum { SHIFTS_PER_ULONG = (BITS_PER_ULONG == 32) ? 5 : 6 };
+    enum { MAX_BITS = (NumBins + BITS_PER_ULONG - 1) & ~(BITS_PER_ULONG - 1) };
+
+
+  private:
+
+    static inline int idx2block (int i) {
+      int blk = i >> SHIFTS_PER_ULONG;
+ROOT = ..
+CROSS_TARGET = 1
+TARGETS = $(ROOT)/libstabilizer.$(SHLIB_SUFFIX) $(ROOT)/libstabilizer.a
+INCLUDE_DIRS = $(ROOT)/Heap-Layers \
+    $(ROOT)/DieHard/src/include \
+    $(ROOT)/DieHard/src/include/math \
+    $(ROOT)/DieHard/src/include/rng \
+    $(ROOT)/DieHard/src/include/static \
+    $(ROOT)/DieHard/src/include/util
+
+include $(ROOT)/common.mk
+ROOT = .
+DIRS = pass runtime
+
+include $(ROOT)/common.mk
+
+clean::
+	@$(MAKE) -C tests clean
+
+test: build
+	@$(MAKE) -C tests test
+    45	// FunctionLocation::~FunctionLocation's getCodeHeap()->free() goes through
+    46	// the same never-filled-bin swap as the data heap's realloc() did (gdb
+    47	// confirmed: reqSz=4096, binIndex=9, ptr swapped to 0x0 at the
+    48	// StrictSegHeap::free call, same as the -Rheap crash). Guard both heaps.
+    49	template <size_t MaxSize, class ShuffledHeap, class UnshuffledHeap>
+    50	class ShuffleFreeGuard : public ShuffledHeap {
+    51	public:
+    52	    inline void free(void* ptr) {
+    53	        // ANSIWrapper already filters NULL on the public path; this guard
+    54	        // keeps the class safe if it is ever composed without the wrapper.
+    55	        if (ptr == nullptr) {
+    56	            return;
+    57	        }
+    58	        if (ShuffledHeap::getSize(ptr) > MaxSize) {
+    59	            UnshuffledHeap::free(ptr);
+    60	        } else {
+    61	            ShuffledHeap::free(ptr);
+    62	        }
+    63	    }
+    64	};
+    65	
+    66	typedef ANSIWrapper<ShuffleFreeGuard<DataShuffle, ShuffleHeap<4096, DataShuffle, KingsleyHeap<DataSource, DataSource> >, KingsleyHeap<DataSource, DataSource> > > DataHeapType;
+    67	typedef ANSIWrapper<ShuffleFreeGuard<CodeShuffle, ShuffleHeap<4096, CodeShuffle, KingsleyHeap<CodeSource, CodeSource> >, KingsleyHeap<CodeSource, CodeSource> > > CodeHeapType;
+    68	    
+    69	DataHeapType* getDataHeap();
+    70	CodeHeapType* getCodeHeap();
+    71	
+    72	#endif
+    30	            asm("icbi 0,%0" : : "r"(p));
+    31	            p += 16;
+    32	        }
+    33	        asm("isync");
+    34	    )
+    35	}
+    36	
+    37	static inline uint8_t getRandomByte() {
+    38	    static RandomNumberGenerator _rng;
+    39	    static uint8_t _randCount = sizeof(int);
+    40	    
+    41	    static union {
+    42	        uint8_t _rands[sizeof(int)];
+    43	        int _bigRand;
+    44	    };
+    45	    
+    46	    if(_randCount == sizeof(int)) {
+    47	        _bigRand = _rng.next();
+    48	        _randCount = 0;
+    49	    }
+    50	    
+    51	    uint8_t r = _rands[_randCount];
+    52	    _randCount++;
+    53	    return r;
+    54	}
+    55	
+    56	#endif
+
+exec
+/bin/bash -lc "grep -R \"class BumpAlloc\\|class SizeHeap\\|getSize (void \\*\" -n Heap-Layers/heaps Heap-Layers/wrappers | head -100
+sed -n '1,240p' Heap-Layers/heaps/top/bumpalloc.h
+sed -n '1,160p' Heap-Layers/heaps/utility/sizeheap.h 2>/dev/null
+grep -R \"class SizeHeap\" -n Heap-Layers" in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 0ms:
+Heap-Layers/heaps/special/bumpalloc.h:31: * @class BumpAlloc
+Heap-Layers/heaps/special/bumpalloc.h:41:  class BumpAlloc : public SuperHeap {
+Heap-Layers/heaps/combining/segheap.h:84:    size_t getSize (void * ptr) {
+Heap-Layers/heaps/top/mallocheap.h:59:    inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/top/mallocheap.h:63:    inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/top/mallocheap.h:67:    inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/top/mmapheap.h:101:    inline static size_t getSize (void * ptr) {
+Heap-Layers/heaps/top/mmapheap.h:182:    inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/objectrep/sizeheap.h:39:   * @class SizeHeap
+Heap-Layers/heaps/objectrep/sizeheap.h:47:  class SizeHeap : public HeaderHeap<SizeHeapHeader, SuperHeap> {
+Heap-Layers/heaps/objectrep/addheap.h:42:    inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/threads/threadheap.h:67:    inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/threads/threadspecificheap.h:189:    inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/threads/lockedheap.h:53:    inline size_t getSize (void * ptr) const {
+Heap-Layers/heaps/threads/lockedheap.h:58:    inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/utility/nullheap.h:39:    inline size_t getSize (void *) const { return 0; }
+Heap-Layers/heaps/utility/old/oneheap.h:47:    inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/utility/oneheap.h:25:    static inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/utility/uniqueheap.h:78:    inline size_t getSize (void * ptr) {
+Heap-Layers/heaps/utility/exactlyoneheap.h:40:    inline size_t getSize (void * ptr) {
+Heap-Layers/wrappers/ansiwrapper.h:119:    inline size_t getSize (void * ptr) {
+sed: can't read Heap-Layers/heaps/top/bumpalloc.h: No such file or directory
+Heap-Layers/heaps/objectrep/sizeheap.h:39:   * @class SizeHeap
+Heap-Layers/heaps/objectrep/sizeheap.h:47:  class SizeHeap : public HeaderHeap<SizeHeapHeader, SuperHeap> {
+
+exec
+/bin/bash -lc "sed -n '1,160p' Heap-Layers/heaps/special/bumpalloc.h
+sed -n '1,130p' Heap-Layers/heaps/objectrep/sizeheap.h
+sed -n '1,200p' Heap-Layers/heaps/objectrep/headerheap.h
+sed -n '1,160p' runtime/MMapSource.h
+sed -n '1,140p' runtime/FunctionLocation.h" in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 0ms:
+// -*- C++ -*-
+
+/*
+
+  Heap Layers: An Extensible Memory Allocation Infrastructure
+  
+  Copyright (C) 2000-2020 by Emery Berger
+  http://www.emeryberger.com
+  emery@cs.umass.edu
+  
+  Heap Layers is distributed under the terms of the Apache 2.0 license.
+
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+
+*/
+
+#ifndef HL_BUMPALLOC_H
+#define HL_BUMPALLOC_H
+
+#include <cstddef>
+
+#include "utility/gcd.h"
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-variable"
+#endif
+
+/**
+ * @class BumpAlloc
+ * @brief Obtains memory in chunks and bumps a pointer through the chunks.
+ * @author Emery Berger <http://www.cs.umass.edu/~emery>
+ */
+
+namespace HL {
+
+  template <size_t ChunkSize,
+	    class SuperHeap,
+	    size_t Alignment_ = 1UL>
+  class BumpAlloc : public SuperHeap {
+  public:
+
+    enum { Alignment = Alignment_ };
+
+    BumpAlloc()
+      : _bump (nullptr),
+	_remaining (0)
+    {
+      static_assert((int) gcd<ChunkSize, Alignment>::VALUE == Alignment,
+		    "Alignment must be satisfiable.");
+      static_assert((int) gcd<SuperHeap::Alignment, Alignment>::VALUE == Alignment,
+		    "Alignment must be compatible with the SuperHeap's alignment.");
+      static_assert((Alignment & (Alignment-1)) == 0,
+		    "Alignment must be a power of two.");
+    }
+
+    inline void * malloc (size_t sz) {
+      // Round up the size if necessary.
+      size_t newSize = (sz + Alignment - 1UL) & ~(Alignment - 1UL);
+
+      // If there's not enough space left to fulfill this request, get
+      // another chunk.
+      if (_remaining < newSize) {
+      	refill(newSize);
+      }
+      // Bump that pointer.
+      char * old = _bump;
+      _bump += newSize;
+      _remaining -= newSize;
+
+      assert ((size_t) old % Alignment == 0);
+      return old;
+    }
+
+    /// Free is disabled (we only bump, never reclaim).
+    inline bool free (void *) { return false; }
+
+  private:
+
+    /// The bump pointer.
+    char * _bump;
+
+    /// How much space remains in the current chunk.
+    size_t _remaining;
+
+    // Get another chunk.
+    void refill (size_t sz) {
+      if (sz < ChunkSize) {
+      	sz = ChunkSize;
+      }
+      _bump = (char *) SuperHeap::malloc (sz);
+      assert ((size_t) _bump % Alignment == 0);
+      _remaining = sz;
+    }
+
+  };
+
+  // We are going to rename this layer to BumpHeap and deprecate BumpAlloc eventually.
+  template <size_t Size, class X>
+  using BumpHeap = BumpAlloc<Size, X>;
+  
+}
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
+#endif
+/* -*- C++ -*- */
+
+/*
+
+  Heap Layers: An Extensible Memory Allocation Infrastructure
+
+  Copyright (C) 2000-2024 by Emery Berger
+  http://www.emeryberger.com
+  emery@cs.umass.edu
+
+  Heap Layers is distributed under the terms of the Apache 2.0 license.
+
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+
+*/
+
+#ifndef HL_SIZEHEAP_H
+#define HL_SIZEHEAP_H
+
+/**
+ * @file sizeheap.h
+ * @brief Contains SizeHeap.
+ */
+
+#include <assert.h>
+
+#include "heaps/objectrep/headerheap.h"
+#include "utility/cpp23compat.h"
+
+namespace HL {
+
+  struct SizeHeapHeader {
+    size_t _sz;
+    size_t _magic;
+  };
+
+  /**
+   * @class SizeHeap
+   * @brief Allocates extra room for the size of an object.
+   *
+   * Uses HeaderHeap to prepend a header containing the requested size
+   * and a magic number for validation.
+   */
+
+  template <class SuperHeap>
+  class SizeHeap : public HeaderHeap<SizeHeapHeader, SuperHeap> {
+
+  private:
+
+    using Base = HeaderHeap<SizeHeapHeader, SuperHeap>;
+
+    enum { MAGIC_NUMBER = 0xCAFEBABE };
+
+  public:
+
+    virtual ~SizeHeap (void) {}
+
+    inline void * malloc (size_t sz) {
+      void * ptr = Base::malloc (sz);
+      Base::getHeader(ptr)->_sz = sz;
+      Base::getHeader(ptr)->_magic = MAGIC_NUMBER;
+      return ptr;
+    }
+
+    inline void free (void * ptr) {
+      if (HL_EXPECT_TRUE(Base::getHeader(ptr)->_magic == MAGIC_NUMBER)) HL_LIKELY {
+	// Probably one of our objects.
+	Base::free (ptr);
+      }
+    }
+
+    inline static size_t getSize (const void * ptr) {
+      if (HL_EXPECT_TRUE(Base::getHeader(ptr)->_magic == MAGIC_NUMBER)) HL_LIKELY {
+	size_t size = Base::getHeader(ptr)->_sz;
+	return size;
+      } else HL_UNLIKELY {
+	// Probably not one of our objects.
+	return 0;
+      }
+    }
+
+  private:
+
+    inline static void setSize (void * ptr, size_t sz) {
+      assert (Base::getHeader(ptr)->_magic == MAGIC_NUMBER);
+      Base::getHeader(ptr)->_sz = sz;
+    }
+
+  };
+
+}
+
+#endif
+/* -*- C++ -*- */
+
+/*
+
+  Heap Layers: An Extensible Memory Allocation Infrastructure
+
+  Copyright (C) 2000-2024 by Emery Berger
+  http://www.emeryberger.com
+  emery@cs.umass.edu
+
+  Heap Layers is distributed under the terms of the Apache 2.0 license.
+
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+
+*/
+
+#ifndef HL_HEADERHEAP_H
+#define HL_HEADERHEAP_H
+
+/**
+ * @file headerheap.h
+ * @brief A generic heap layer that prepends a header to each allocation.
+ *
+ * HeaderHeap reserves space for a Header object before each allocation
+ * and provides getHeader() to recover it from a user pointer. Subclasses
+ * override malloc/free to initialize and validate the header.
+ *
+ * Compare to AddHeap, which reserves space using lcm-based sizing
+ * but does not provide getHeader() or initialization hooks.
+ */
+
+#include "utility/gcd.h"
+
+namespace HL {
+
+  template <class Header, class SuperHeap>
+  class HeaderHeap : public SuperHeap {
+  public:
+
+    enum { Alignment = gcd<(int) SuperHeap::Alignment,
+	   (int) sizeof(Header)>::value };
+
+    inline void * malloc (size_t sz) {
+      Header * p = (Header *) SuperHeap::malloc (sz + sizeof(Header));
+      return (void *) (p + 1);
+    }
+
+    inline void free (void * ptr) {
+      SuperHeap::free (getHeader(ptr));
+    }
+
+    inline static Header * getHeader (const void * ptr) {
+      return ((Header *) ptr - 1);
+    }
+  };
+
+}
+
+#endif
+#if !defined(RUNTIME_MMAPSOURCE_H)
+#define RUNTIME_MMAPSOURCE_H
+
+#include "Util.h"
+#include "CodeWindow.h"
+
+#if defined(__linux__) && defined(__x86_64__)
+#include <errno.h>
+#endif
+
+template<int Prot, int Flags> class MMapSource {
+private:
+    bool _exhausted32;
+
+#if defined(__linux__) && defined(__x86_64__)
+    inline uintptr_t rand_u64() {
+        static RandomNumberGenerator rng;
+        uint64_t hi = (uint32_t)rng.next();
+        uint64_t lo = (uint32_t)rng.next();
+        return (uintptr_t)((hi << 32) | lo);
+    }
+
+    inline void* mmapInWindow(uintptr_t lo, uintptr_t hi, size_t sz) {
+        // Require a non-empty interval with space for sz.
+        if(hi <= lo) {
+            return NULL;
+        }
+        if(sz > (size_t)(hi - lo)) {
+            return NULL;
+        }
+
+        // Align bounds to pages.
+        const uintptr_t pageMask = ~((uintptr_t)Alignment - 1u);
+        lo = (lo + (Alignment - 1u)) & pageMask; // round up
+        hi = hi & pageMask;                      // round down
+
+        if(hi <= lo || (uintptr_t)(hi - lo) < (uintptr_t)sz) {
+            return NULL;
+        }
+
+        uintptr_t maxBase = hi - (uintptr_t)sz;
+        uintptr_t spanPages = (maxBase - lo) / (uintptr_t)Alignment;
+
+#if defined(MAP_FIXED_NOREPLACE)
+        static bool fixed_noreplace_works = true;
+#endif
+
+        // Try a bounded number of random placements within the window.
+        for(size_t attempt = 0; attempt < 256; attempt++) {
+            uintptr_t page = (spanPages == 0) ? 0 : (rand_u64() % (spanPages + 1u));
+            uintptr_t addr = lo + page * (uintptr_t)Alignment;
+
+#if defined(MAP_FIXED_NOREPLACE)
+            if(fixed_noreplace_works) {
+                void* p = mmap((void*)addr, sz, Prot, (Flags & ~MAP_32BIT) | MAP_FIXED_NOREPLACE, -1, 0);
+                if(p != MAP_FAILED) {
+                    return p;
+                }
+                if(errno == EINVAL) {
+                    fixed_noreplace_works = false;
+                }
+                continue;
+            }
+#endif
+
+            // Fallback: use an address hint, then verify it landed in-range.
+            void* p = mmap((void*)addr, sz, Prot, (Flags & ~MAP_32BIT), -1, 0);
+            if(p == MAP_FAILED) {
+                continue;
+            }
+
+            uintptr_t got = (uintptr_t)p;
+            if(got < lo || got > maxBase) {
+                munmap(p, sz);
+                continue;
+            }
+            return p;
+        }
+
+        return NULL;
+    }
+#endif
+    
+public:
+    enum { Alignment = PAGESIZE };
+
+    MMapSource() {
+        _exhausted32 = false;
+    }
+    
+    inline void* malloc(size_t sz) {
+        void* ptr;
+
+#if defined(__linux__) && defined(__x86_64__)
+        // For executable allocations (relocated code), try to allocate within
+        // the configured window near the original text so 32-bit pc-relative
+        // relocations remain representable even for PIE binaries.
+        if(Prot & PROT_EXEC) {
+            uintptr_t lo = 0;
+            uintptr_t hi = 0;
+            if(stabilizer_get_code_window(&lo, &hi)) {
+                ptr = mmapInWindow(lo, hi, sz);
+                if(ptr != NULL) {
+                    return ptr;
+                }
+                // If a code window is configured, failing to allocate within it
+                // means we cannot safely relocate code (pc-relative fixups may
+                // overflow). Fail fast rather than falling back to an arbitrary
+                // address.
+                return NULL;
+            }
+        }
+#endif
+
+        if(Flags & MAP_32BIT) {
+            // If we haven't exhausted the 32 bit pages
+            if(!_exhausted32) {
+                ptr = mmap(NULL, sz, Prot, Flags, -1, 0);
+                
+                if(ptr != MAP_FAILED) {
+                    return ptr;
+                } else {
+                    _exhausted32 = true;
+                }
+            }
+        }
+        
+        // Try the map without the MAP_32BIT flag set
+        ptr = mmap(NULL, sz, Prot, Flags & ~MAP_32BIT, -1, 0);
+        
+        if(ptr == MAP_FAILED) {
+            ptr = NULL;
+        }
+        
+        return ptr;
+    }
+};
+
+#endif
+#if !defined(RUNTIME_FUNCTIONLOCATION_H)
+#define RUNTIME_FUNCTIONLOCATION_H
+
+#include <set>
+
+#include "MemRange.h"
+#include "Function.h"
+#include "CodeWindow.h"
+
+struct FunctionLocation {
+private:
+    friend class Function;
+    
+    Function* _f;
+    MemRange _memory;
+    bool _defunct;
+    bool _marked;
+    
+    static inline std::set<FunctionLocation*>& getRegistry() {
+        static std::set<FunctionLocation*> _registry;
+        return _registry;
+    }
+    
+    static FunctionLocation* find(void* p) {
+        for(std::set<FunctionLocation*>::iterator iter = getRegistry().begin(); iter != getRegistry().end(); iter++) {
+            FunctionLocation* l = *iter;
+            if(l->_memory.contains(p)) {
+                return l;
+            }
+        }
+        
+        return NULL;
+    }
+    
+public:
+    FunctionLocation(Function* f) :  _f(f), _memory(getCodeHeap()->malloc(_f->getAllocationSize()), _f->getAllocationSize()) {
+        if(_memory.base() == NULL) {
+            perror("code malloc");
+            uintptr_t lo = 0;
+            uintptr_t hi = 0;
+            if(stabilizer_get_code_window(&lo, &hi)) {
+                ABORT("Couldn't allocate memory for function relocation within code window [%p, %p)", (void*)lo, (void*)hi);
+            }
+            ABORT("Couldn't allocate memory for function relocation");
+        }
+        
+        _defunct = false;
+        _marked = false;
+
+        _f->copyTo(_memory.base());
+        
+        getRegistry().insert(this);
+    }
+    
+    ~FunctionLocation() {
+        getCodeHeap()->free(_memory.base());
+    }
+    
+    /**
+     * \brief Allocate FunctionLocation objects on the randomized heap
+     * \arg sz The object size
+     */
+    void* operator new(size_t sz) {
+        return getDataHeap()->malloc(sz);
+    }
+    
+    /**
+     * \brief Free allocated memory to the randomized heap
+     * \arg p The object base pointer
+     */
+    void operator delete(void* p) {
+        getDataHeap()->free(p);
+    }
+    
+    void activate() {
+        _f->forward(_memory.base());
+    }
+    
+    void release() {
+        _defunct = true;
+    }
+    
+    void* getBase() {
+        return _memory.base();
+    }
+    
+    static void mark(void* p) {
+        FunctionLocation* l = find(p);
+        if(l != NULL) {
+            l->_marked = true;
+        }
+    }
+    
+    static void sweep() {
+        std::set<FunctionLocation*>::iterator iter = getRegistry().begin();
+        
+        while(iter != getRegistry().end()) {
+            FunctionLocation* l = *iter;
+            
+            if(l->_defunct && !l->_marked) {
+                getRegistry().erase(iter++);
+                delete l;
+            } else {
+                l->_marked = false;
+                iter++;
+            }
+        }
+    }
+    
+    static void* adjust(void* p) {
+        FunctionLocation* l = find(p);
+        if(l != NULL) {
+            size_t offset = l->_memory.offsetOf(p);
+            return l->_f->_code.offsetIn(offset);
+        } else {
+            return p;
+        }
+    }
+};
+
+#endif
+
+exec
+/bin/bash -lc 'nice ionice -c 3 make -j2' in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 0ms:
+make: jobserver mkfifo: /tmp/GMfifo2: Read-only file system
+ [build] Entering pass
+make[1]: Entering directory '/home/matthias/prog/stabilizer-parsa-fix/stabilizer/pass'
+make[1]: Leaving directory '/home/matthias/prog/stabilizer-parsa-fix/stabilizer/pass'
+ [build] Entering runtime
+make[1]: Entering directory '/home/matthias/prog/stabilizer-parsa-fix/stabilizer/runtime'
+make[1]: Leaving directory '/home/matthias/prog/stabilizer-parsa-fix/stabilizer/runtime'
+
+exec
+/bin/bash -lc "g++ -std=c++17 -fsyntax-only -Iruntime -IHeap-Layers -IDieHard/src/include -IDieHard/src/include/math -IDieHard/src/include/rng -IDieHard/src/include/static -IDieHard/src/include/util runtime/Heap.cpp
+sed -n '1,160p' runtime/Function.cpp
+grep -R \"free_sized\\|free_aligned_sized\" -n runtime pass tests" in /home/matthias/prog/stabilizer-parsa-fix/stabilizer
+ succeeded in 267ms:
+#include "Function.h"
+#include "FunctionLocation.h"
+
+#if defined(__x86_64__)
+#include <elf.h>
+#include <limits>
+#endif
+
+/**
+ * Free the current function location and stack pad table
+ */
+Function::~Function() {
+    if(_current != NULL) {
+        _current->release();
+    }
+    
+    if(_stackPad != NULL) {
+        getDataHeap()->free(_stackPad);
+    }
+}
+
+/**
+ * Copy the code and relocation table for this function.  Use the pre-assembled
+ * code/table chunk if the function has already been relocated.
+ * 
+ * \arg target The destination of the copy.
+ */
+void Function::copyTo(void* target) {
+    void* source = NULL;
+
+    if(_current == NULL) {
+        source = _code.base();
+
+        // Copy the code from the original function
+        memcpy(target, _code.base(), _code.size());
+
+        // Patch in the saved header, since the original has been overwritten
+        *(FunctionHeader*)target = _savedHeader;
+
+        // If there is a stack pad table, move it to a random location
+        if(_stackPad != NULL && _table.base() != NULL && _table.size() >= sizeof(uintptr_t)) {
+            uintptr_t* table = (uintptr_t*)_table.base();
+            size_t n = _table.size() / sizeof(uintptr_t);
+            for(size_t i = 0; i < n; i++) {
+                if(table[i] == (uintptr_t)_stackPad) {
+                    _stackPad = (uint8_t*)getDataHeap()->malloc(1);
+                    table[i] = (uintptr_t)_stackPad;
+                }
+            }
+        }
+
+        // Copy the relocation table, if needed
+        if(_tableAdjacent) {
+            uint8_t* a = (uint8_t*)target;
+            memcpy(&a[_code.size()], _table.base(), _table.size());
+        }
+    } else {
+        source = _current->_memory.base();
+        memcpy(target, source, getAllocationSize());
+    }
+
+    // After copying the code to a new location, patch any pc-relative
+    // references (e.g., constant pools) so they still point to the intended
+    // external targets from the new location.
+    if(source != NULL) {
+        applyTextRelocs(source, target);
+    }
+}
+
+/**
+ * Create a new FunctionLocation for this Function.
+ * \arg relocation The ID for the current relocation phase.
+ * \returns Whether or not a new location was created
+ */
+FunctionLocation* Function::relocate() {
+    FunctionLocation* oldLocation = _current;
+    _current = new FunctionLocation(this);
+    _current->activate();
+
+    // Fill the stack pad table with random bytes
+    if(_stackPad != NULL) {
+        // Update random stack pad
+        *_stackPad = getRandomByte();
+    }
+    
+    return oldLocation;
+}
+
+void Function::applyTextRelocs(void* source, void* dest) {
+#if defined(__x86_64__)
+    if(_textRelocs.empty()) {
+        return;
+    }
+
+    intptr_t delta = (uint8_t*)dest - (uint8_t*)source;
+
+    // If the function didn't move, nothing to do.
+    if(delta == 0) {
+        return;
+    }
+
+    uint8_t* src = (uint8_t*)source;
+    uint8_t* dst = (uint8_t*)dest;
+
+    // Anything within the copied allocation should move with the function,
+    // and therefore should NOT be re-targeted back to the original address.
+    uintptr_t internal_begin = (uintptr_t)src;
+    uintptr_t internal_end = (uintptr_t)src + _code.size() + (_tableAdjacent ? _table.size() : 0);
+
+    for(const TextReloc& r : _textRelocs) {
+        // All relocation types we currently record are 32-bit fields.
+        if(r.offset + sizeof(int32_t) > _code.size()) {
+            continue;
+        }
+
+        uint8_t* oldP = src + r.offset;
+        uint8_t* newP = dst + r.offset;
+
+        int32_t oldVal = 0;
+        memcpy(&oldVal, newP, sizeof(oldVal));
+
+        switch(r.type) {
+            case R_X86_64_PC32:
+            case R_X86_64_PLT32:
+            {
+                // Relocation semantics: S + A - P
+                // Derive S from the already-relocated field value.
+                intptr_t S = (intptr_t)oldVal + (intptr_t)oldP - (intptr_t)r.addend;
+
+                // If the target is within our copied allocation, leave it alone
+                // so it continues to resolve into the relocated copy (including
+                // the adjacent relocation table).
+                if((uintptr_t)S >= internal_begin && (uintptr_t)S < internal_end) {
+                    break;
+                }
+
+                int64_t newVal64 = (int64_t)oldVal - (int64_t)delta;
+                if(newVal64 < std::numeric_limits<int32_t>::min() || newVal64 > std::numeric_limits<int32_t>::max()) {
+                    ABORT("Text relocation overflow (PC32/PLT32): func=%p src=%p dst=%p off=%zu old=%d delta=%ld",
+                        _code.base(), source, dest, r.offset, (int)oldVal, (long)delta);
+                }
+
+                int32_t newVal = (int32_t)newVal64;
+                memcpy(newP, &newVal, sizeof(newVal));
+                break;
+            }
+
+            case R_X86_64_GOTPCREL:
+            case R_X86_64_GOTPCRELX:
+            case R_X86_64_REX_GOTPCRELX:
+            case R_X86_64_GOTPC32:
+            case R_X86_64_TLSGD:
+            case R_X86_64_TLSLD:
+            case R_X86_64_GOTTPOFF:
+            case R_X86_64_GOTPC32_TLSDESC:
+            {
+                int64_t newVal64 = (int64_t)oldVal - (int64_t)delta;
+                if(newVal64 < std::numeric_limits<int32_t>::min() || newVal64 > std::numeric_limits<int32_t>::max()) {
+                    ABORT("Text relocation overflow (x86_64 pc-relative 32, type=%u): func=%p src=%p dst=%p off=%zu old=%d delta=%ld",
+                        (unsigned)r.type, _code.base(), source, dest, r.offset, (int)oldVal, (long)delta);
+grep: runtime/obj/Heap.o: binary file matches
+
+codex
+The changes correctly reset the random-byte cursor and route allocations larger than the shuffle threshold through the underlying heap on free. The modified runtime code also passes a syntax-only compilation check.
+The changes correctly reset the random-byte cursor and route allocations larger than the shuffle threshold through the underlying heap on free. The modified runtime code also passes a syntax-only compilation check.
