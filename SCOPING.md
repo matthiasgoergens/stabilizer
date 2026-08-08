@@ -445,6 +445,37 @@ localised defects. Run both prongs in parallel; neither blocks the other:
    a fixed-RNG replication may genuinely move the numbers — in either
    direction.
 
+## Language scope: not C-only, but the port's envelope is what binds
+
+Asked because it bears on "the right basis in 2026". Stabilizer is an LLVM
+pass plus a runtime; the pass operates on LLVM IR, so it is
+**frontend-agnostic in principle** — anything that emits LLVM bitcode can
+be instrumented. This is not hypothetical: parsa's `szc` driver already
+handles **two** frontends through one bitcode→`opt`→link path — clang
+(C/C++) and **Flang (Fortran)** (`szc` lines ~60, 106, 144-168). rustc is
+an LLVM frontend and can emit bitcode (`--emit=llvm-bc`), so the pass
+could mechanically be pointed at Rust too.
+
+The binding constraint is not the language but the **runtime envelope**,
+and Rust sits outside it on multiple axes at once — which is why "support
+Rust" and "clear the port debt in §3.2" are the same task:
+- **Threads** — idiomatic Rust and `std` are threaded; the runtime is
+  structurally single-threaded. Bites immediately.
+- **Unwinding** — Rust panics unwind via `.eh_frame`; relocated code has
+  none. `panic=abort` sidesteps it but changes semantics.
+- **TLS** — Rust `std` uses thread-locals pervasively; that is exactly
+  the bug class (magras `4e154b8f`) absent from parsa's lineage.
+- **Allocator** — Rust routes allocation through `GlobalAlloc`, not C
+  `malloc`/`free`; the heap arm needs a `#[global_allocator]` shim
+  forwarding to the Stabilizer heap or it simply does not apply.
+- **Entry point** — the runtime hijacks `main`; Rust starts via
+  `lang_start`.
+So: code/stack randomisation on Rust is plausible with real integration
+work, the heap arm needs an allocator shim, and the whole collides with
+the single-threaded-runtime limitation. A Rust (or C++/exceptions, or any
+threaded) workload is therefore a **port-debt probe**, not "just another
+benchmark" — the same conclusion the gate reached from the variance side.
+
 ## Stretch goal: upstreaming into LLVM proper
 
 The archaeology says the door is open but narrow. Nobody has ever proposed a
