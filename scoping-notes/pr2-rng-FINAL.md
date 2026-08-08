@@ -20,3 +20,7 @@ post-fix stays in the buffer with a refill every four calls. This PR fixes
 -Rstack only; the heap/code crashes are a separate PR. With it,
 tests/libquantum (851 2) runs to completion under -Rstack over ~170
 epochs, output byte-identical to an uninstrumented build.
+
+
+---
+POSTED 2026-08-09: https://github.com/parsa/stabilizer/pull/1 (branch matthiasgoergens:llvm21-rng-fix). -Rstack smoke on the branch: 6/6 pass, output oracle-identical.
