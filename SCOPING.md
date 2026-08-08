@@ -308,8 +308,19 @@ localised defects. Run both prongs in parallel; neither blocks the other:
    the code heap), one was a latent 2013 bug (the RNG cursor reset).
    Success criterion met: all modes combined, ~170 epochs, three runs,
    byte-identical output — parity with the period original on this
-   benchmark. The fixes were cross-model reviewed and the review
-   adjudicated (`scoping-notes/deepseek-fix-review-adjudication.md`).
+   benchmark. The fixes were cross-model reviewed and adjudicated
+   (`scoping-notes/deepseek-fix-review-adjudication.md`) and then
+   stress-tested (`~/prog/stabilizer-stress/NOTES.md`): 23k+ hypothesis
+   op-sequences and an 80-min AFL++ run (983,748 execs, **0 crashes**,
+   two hangs both triaged to benign large-alloc timeouts) against the
+   real heap compositions; the RNG steady-state trace measured, not
+   just derived (12/12 properties confirmed); a 7-run soak plus a second
+   workload (bzip2) passing all modes. The adjudication's open residual
+   (a malloc/free bypass-classification mismatch) was proven unreachable
+   analytically and by exhaustive size sweep — MaxSize 256 is itself a
+   Kingsley class boundary. Two follow-on commits landed and were
+   verified: the RNG first-four-zeros micro-fix (`24df701`) and a
+   defence-in-depth null guard (`6b263a4`).
    The probe condition in the gate above is therefore satisfied; the
    baseline condition remains open. Known remaining debt for the port
    proper: the TLS bug class (magras `4e154b8f`) untriggered by
