@@ -19,8 +19,17 @@ The fix is a small ShuffleFreeGuard layer that restores malloc()'s bypass
 on free, routing over-MaxSize objects to the unshuffled heap. Three
 commits: the guard on the data heap, the same on the code heap, and a
 null check (unreachable through ANSIWrapper, which already filters null —
-defence-in-depth). This PR fixes -Rheap and -Rcode; -Rstack is an
-unrelated bug in another file, sent separately. With this PR and the
-separate stack PR, tests/libquantum (851 2) runs to completion under
--Rheap, -Rcode, and all modes combined, output byte-identical to an
-uninstrumented build. Happy to share the test harness and logs.
+defence-in-depth).
+
+This fixes the observed -Rheap failure independently and removes the
+deterministic -Rcode crash. Two separate issues remain, each its own fix:
+the -Rstack out-of-bounds read (already open as #1), and an intermittent
+exit-time timer race that also affects -Rcode (a small runtime-lifecycle
+fix I'll send once it's complete). Under -Rheap, tests/libquantum (851 2)
+runs to completion byte-identical to an uninstrumented build; full -Rcode
+reliability also needs the timer fix. Happy to share the test harness and
+logs.
+
+
+---
+POSTED 2026-08-09: https://github.com/parsa/stabilizer/pull/2 (branch matthiasgoergens:llvm21-heap-fixes).

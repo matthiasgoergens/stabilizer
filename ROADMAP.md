@@ -95,6 +95,21 @@ an author.)
   a threading one; DeepSeek code review, 2026-08-08). Consider a single
   shared, locked RNG when threads land.
 
+### Phase 1b — real szc Rust frontend (DONE 2026-08-09)
+Turned the spike into a reusable capability:
+`~/prog/stabilizer-rust-frontend/` (driver on branch `rust-frontend`,
+`RUST.md`, `scripts/run-smoke.sh`). A `-lang=rust` path with: rustc↔opt
+LLVM version detection (clear diagnostic instead of the cryptic
+`Unknown attribute kind`, auto-selects a matching rustup toolchain if
+present), the linker-substitution trick formalised
+(`rust-support/subst-linker.sh`), and a real `#[global_allocator]` shim
+crate (`rust-support/stabilizer_alloc.rs`) confirmed live via `nm`/`ldd`.
+Two single-threaded `panic=abort` programs (minimal + a richer
+struct/`Vec`/`f64`/`match` one) run correctly under `-Rcode`/`-Rstack`/
+`-Rheap`/all, no-`-R` builds byte-identical to plain rustc. std stays
+unrandomised (Phase 4). Version pin: rustc 1.93.0 ↔ LLVM 21.1.8 (a
+cadence coincidence, not a guarantee — the diagnostic guards it).
+
 ### Phase 4 — real Rust + productionising
 Full `std` Rust (threads, panics, TLS), a `#[global_allocator]` crate for
 heap randomisation, and a Cargo integration story. Then Rust workloads

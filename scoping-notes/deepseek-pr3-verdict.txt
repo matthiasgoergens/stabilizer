@@ -1,0 +1,87 @@
+**Findings: incomplete shutdown guard – onTrap unprotected**  
+The fix introduces a `shutting_down` flag checked in `onTimer` to prevent re‑randomization after `stabilizer_main()` returns.  However, `onTrap` (the signal handler for trapped functions) is not protected.  A trap may still be hit during teardown, causing `onTrap` to relocate/write to function code that has already been unmapped, leading to exactly the same ABORT fault the fix claims to prevent.  This is an **incomplete fix – a sibling of the original bug remains open**.
+
+**Concrete failure scenario**  
+```c
+// Program uses dlopen, traps a function, then atexit unmaps the library.
+#include <dlfcn.h>
+void *lib = dlopen("libfoo.so", RTLD_NOW);
+void (*foo)(void) = dlsym(lib, "foo");
+// Stabilizer has placed a trap on foo.
+atexit([] { dlclose(lib); });  // unmaps libfoo’s code
+atexit(foo);                    // calls foo → trap → onTrap writes into unmapped memory → ABORT
+```
+
+---
+
+### Evaluation of the five specific points
+
+1. **Race window between `stabilizer_main()` return and `shutting_down = 1`**  
+   *CONFIRMED (sound)* – The window exists but no tear‑down has started; memory is still mapped, so a timer that fires during this window will execute `onTimer` normally (a harmless re‑randomization).  No fault can occur.
+
+2. **`onTrap`: destructors / `atexit` after `stabilizer_main()` could call a trapped function → `onTrap` relocates during teardown**  
+   *REFUTED (failing scenario above)* – The fix does not guard `onTrap`.  If any trapped function is executed after libraries are unloaded (e.g., via `atexit` or global destructors), the handler will attempt to write to unmapped memory, reproducing the same ABORT fault.  The fix is therefore incomplete.
+
+3. **Does `setTimer(0)` actually disarm `ITIMER_REAL`?**  
+   *CONFIRMED* – POSIX `setitimer` with `it_value = 0` disarms the timer.  Assuming `setTimer` is a thin wrapper that sets `it_interval` to 0 as well, it is correct.
+
+4. **Is checking `shutting_down` at `onTimer` entry sufficient, or can a signal already past the check still touch freed state?**  
+   *CONFIRMED (sufficient, given window safety)* – The only danger is a handler that entered before the flag was set, i.e. in the window of point 1, where memory is still valid.  After the flag is visible the handler returns immediately.  The check is sufficient.
+
+5. **Signal‑safety: `volatile sig_atomic_t` and ordering (flag before `setTimer(0)`)**  
+   *CONFIRMED* – `volatile sig_atomic_t` is the mandated type for a flag accessed from a signal handler.  Writing the flag before disarming ensures that any alarm signal delivered *after* the write sees `shutting_down == 1` and becomes a no‑op.  The opposite order would leave a race where a signal arrives after disarm but before the flag is set, with the handler missing the flag and proceeding (though still harmless because disarm stops further alarms); but the chosen order is strictly safer.
+
+---
+
+### Proposed measurements
+
+#### DECISIVE
+
+**Demo of the onTrap teardown bug**  
+Goal: show that a trap hit after library unload still causes an ABORT, even with the fix applied.  
+Command / code (run on the fixed build):
+```bash
+# compile a trivial library that exports a function
+echo 'void foo(void) {}' | g++ -shared -fPIC -o libfoo.so -xc -
+# compile a program that dlopens it, uses atexit to close it and then call foo
+cat > test_onTrap.cpp << 'EOF'
+#include <dlfcn.h>
+#include <cstdlib>
+void *lib;
+void (*foo)(void);
+void cleanup() { dlclose(lib); }
+int stabilizer_main(int, char**) {
+    lib = dlopen("./libfoo.so", RTLD_NOW);
+    foo = (void(*)())dlsym(lib, "foo");
+    // Let stabilizer trap foo (dummy call forces instrumentation)
+    foo();
+    atexit(cleanup);
+    atexit(foo);   // will hit trap after library unmapped
+    return 0;
+}
+EOF
+# link with the stabilizer runtime and run
+# prediction: process aborts with a segfault caught by onFault (exit code SIGABRT)
+```
+**Predicted output** (under the current incomplete fix): process terminates abnormally due to a fault in `onTrap` after `dlclose`, demonstrating the bug.  The opposite (a correct fix) would exit cleanly.
+
+**Verify `setTimer(0)` disarm**  
+Goal: confirm that after `setTimer(0)` no more alarms fire.  
+Modify the runtime temporarily to print the timer value before the `return r;`:
+```cpp
+struct itimerval v;
+getitimer(ITIMER_REAL, &v);
+printf("after setTimer(0): it_value = %ld %ld\n", v.it_value.tv_sec, v.it_value.tv_usec);
+```
+**Predicted output**: `it_value = 0 0`.  If non‑zero, the disarm is broken.
+
+#### EXPLORATORY
+
+**Probe the exact timing gap between main return and shutting_down**  
+Insert (temporary, non‑signal‑safe) logging via a `write()` call immediately before and after `shutting_down = 1` to measure execution time and observe if any alarm can land in that window when the interval is very short (e.g., 1 µs).  This helps quantify the risk of the window, even if it is currently harmless.
+
+**Dump onTrap activity during teardown**  
+Add a `shutting_down` check inside `onTrap` (similar to the one in `onTimer`) but currently missing, and log a counter of how many times `onTrap` is reached during teardown.  This reveals whether trapped functions actually are called after main returns in the existing test suite or in the 20/20 clean run.  If the count is >0, the bug is live.
+
+**Check whether any trapped functions are called after `setTimer(0)` in the original faulting scenario**  
+Use `atexit` to install a handler that prints the address range of known trapped functions, then run the test that previously showed 3/13 passes.  If any are called after `setTimer(0)`, they would trigger `onTrap` and the incomplete fix would not prevent the fault.

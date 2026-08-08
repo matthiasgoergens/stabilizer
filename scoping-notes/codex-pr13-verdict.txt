@@ -1,0 +1,51 @@
+## Verdict
+
+- **PR1 — POST-WITH-EDITS**
+- **PR3 — DO-NOT-POST** as described; the timer change is necessary but not a complete shutdown fix.
+- **Structure — two stacked PRs**, not one combined PR.
+
+I could not retrieve `llvm21-timer-fix` from the configured remote, so the PR3 code verdict is based on the specified flag/check/disarm diff and the local runtime source.
+
+### PR1: POST-WITH-EDITS
+
+Its mechanism is accurate. `ShuffleFreeGuard` correctly mirrors `ShuffleHeap::malloc()`’s large-allocation bypass on both data and code heaps. The text is also appropriately scoped for `-Rcode`: it says the change “removes the deterministic `-Rcode` crash”, not that `-Rcode` is now fully reliable.
+
+Edit one phrase to avoid an absolute claim unsupported by a single workload:
+
+- Replace “This makes `-Rheap` fully reliable” with “This fixes the observed `-Rheap` failure independently.”
+- Keep “removes the deterministic `-Rcode` crash”.
+- Keep the explicit statement that the timer PR is still needed for reliable `-Rcode`.
+
+`-Rheap` is correctly separate from the timer fault: with no registered functions, `onTimer` takes the stack-pad path rather than the trap-placement path.
+
+### PR3: DO-NOT-POST
+
+The timer change is a good partial fix:
+
+- `volatile sig_atomic_t` is the right minimum type for a signal-handler-visible shutdown flag.
+- Set it **before** `setTimer(0)`, and ensure the check is the first executable statement in `onTimer`.
+- `setTimer(0)` does disarm `ITIMER_REAL`: both `it_value` fields become zero.
+
+However, it is not complete teardown protection.
+
+- A `SIGALRM` delivered just before `shutting_down = 1` can still execute `onTimer`. In the present single-threaded wrapper this occurs before the wrapper `main` has returned to libc and hence before ordinary exit destruction begins, so it is not the principal teardown hole; nevertheless, do not claim every “already in-flight” alarm becomes a no-op.
+- More importantly, the runtime leaves `SIGTRAP` installed and leaves code-entry traps armed. An atexit handler or C++ destructor calling a trapped instrumented function enters `onTrap`, which accesses `live_functions`, the `FunctionLocation` registry, heaps, and may sweep or re-arm the timer. Those objects can already be in destruction. The proposed `onTimer` guard does nothing for this path.
+- The existing non-`sig_atomic_t` globals (`rerandomizing`, STL containers, etc.) mean this is not generally async-signal-safe. The new flag is correct for its purpose, but should not be presented as solving signal-safety overall.
+
+Required code/design edits before posting:
+
+- Define a real shutdown protocol before returning from wrapper `main`: block `SIGALRM`, set `shutting_down`, disarm the timer, and retain the block through process exit.
+- Deal explicitly with `SIGTRAP`: restore/untrap registered function entries before destructors can run, or provide an equally safe shutdown forwarding path. Simply returning from `onTrap` is invalid because execution would resume after the `int3`.
+- Initialise `sa.sa_mask` with `sigemptyset`; it is currently uninitialised in `setHandler`.
+- Add a deterministic teardown test: an atexit/destructor callback invoking an instrumented function after user `main` returns. Repeat tests should be run atop PR1 and reported as such.
+
+Revise the description to say the demonstrated fault is in the code-randomisation trap-placement path and explicitly that `-Rheap` is unaffected. Preserve the honest qualification that verification was only with the heap fix; do not write “not specific to any mode”.
+
+### Structure: two stacked PRs
+
+Keep them separate:
+
+1. **PR1:** heap-composition correctness (`Heap.h`), independently fixes `-Rheap` and the deterministic code-heap free/sweep crash.
+2. **PR3:** shutdown/signal lifecycle (`libstabilizer.cpp`), based on PR1 and explicitly declaring that dependency.
+
+They are independently reviewable bugs in separate files. PR3’s verification dependence does not make the heap change conceptually part of the timer fix; it just means `-Rcode` needs both patches for reliable operation.
