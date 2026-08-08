@@ -16,8 +16,20 @@ the ~2× overhead disclosed in §0/§3, coverage claims re-scoped to what
 the notes' own statements support, the gate pre-registered (§3.1a), and
 an evidence manifest added (`scoping-notes/evidence-manifest.md`) so the
 out-of-repo validation artefacts are pinned. Codex separately CONFIRMED
-all five port-fix commits (`codex-fixes-verdict.txt`). The
-recommendation remains conditional on the task-4 baseline.
+all five port-fix commits (`codex-fixes-verdict.txt`). A second DeepSeek
+round then reviewed *this* revision — the whole document
+(`deepseek-scoping-r2-verdict.txt`) and the gate specifically
+(`deepseek-gate-verdict.txt`), both REFUTED — converging with codex on
+two points: "tractability condition met" overstated
+feasibility-to-complete into usable-now, and two convenience-sample
+benchmarks cannot decide the general question. Adjudicated in
+`cross-model-round3-adjudication.md` (both accepted as WEAKENED: the
+probe conclusion survives; the wording and the gate's reach did not).
+This revision moves the recommendation's centre of gravity accordingly
+(§0, now leaning deflationary) and reframes the gate as
+necessary-not-sufficient (§3.1a). The recommendation remains conditional
+on a *diverse-workload* baseline, of which the running two-benchmark run
+is only a calibration/existence stage.
 
 Evidence base: `scoping-notes/` in this repo — `runtime-analysis.md` (source
 read of the runtime and pass), `fork-survey.md` (51 repos, all 163 branches
@@ -51,11 +63,23 @@ bzip2 data came out *reversed* from the paper's normality prediction**
 (per-build padding means looked normal, Stabilizer's within-run samples
 did not — §3.1) and **measured Stabilizer overhead was ~2×, far above
 the paper's <7% median claim**, both awaiting the clean re-run. The
-recommendation is therefore **conditional, per the brief's own gate**:
-the port-tractability condition is now met; the baseline condition is
-open, pre-registered in §3.1a, and decided by the experiment currently
-running — commit to the full resurrection only if the cheap route
-proves insufficient under those pre-specified criteria.
+recommendation is therefore **conditional and, on current evidence,
+leaning deflationary** — a shift from this document's earlier
+"conditional yes, likely port", forced by three adversarial reviews
+across two model families (codex + DeepSeek; §0 provenance). Precisely:
+the tractability *probe* succeeded — the crashes are localised,
+modest-effort bugs, not structural walls, so *completing* the port is
+engineering rather than research — but the port is **not** a usable
+general benchmarking tool today: it works on two single-threaded C
+benchmarks while threads, TLS, C++ unwinding, hardened targets and
+debugger support are all open (§3.2). So the honest position is: **the
+working modern port is a deliverable in its own right** (preserved,
+fixed, on a 2026 toolchain); **expect the cheap route** (K-seed padding +
+DieHard, under proper randomised-paired methodology) **to suffice for
+most benchmarking**; and **commit to finishing the port only if a
+diverse-workload baseline shows a gap the cheap route cannot fill.** The
+two-benchmark experiment now running (§3.1a) is a calibration/existence
+stage, not that diverse-workload decision.
 
 ## 1. The alternatives, evaluated
 
@@ -318,36 +342,55 @@ localised defects. Run both prongs in parallel; neither blocks the other:
    allocator regime.
 1a. **Pre-registered gate criteria** (written 2026-08-08 ~23:00, while
    the v2 batch is mid-run and unexamined beyond its first pairs;
-   responding to the codex finding that an unspecified gate lets either
-   outcome be rationalised). Primary estimand: the within-pair
+   responding to codex's "unspecified gate lets either outcome be
+   rationalised" and DeepSeek's "two benchmarks cannot decide the general
+   question, and 'on both benchmarks' is gameable by workload choice").
+
+   **The two-benchmark run is necessary-not-sufficient, and its two
+   directions are not symmetric** — this is the key correction. libquantum
+   and bzip2 are a convenience sample (single-threaded, call-heavy, from
+   the tool's own suite), so:
+   - A *pass* for the cheap route on them ("padding + DieHard controls
+     layout variance below the effect of interest here") **does not
+     generalise** — it cannot license "cheap route sufficient in general".
+   - A *failure* — the cheap route leaving σ_b above the effect of
+     interest, or Stabilizer demonstrably capturing variance the cheap
+     route cannot — **is an existence proof** and does license
+     "cheap route insufficient for at least some real workloads".
+   So this stage can argue *for* the port (by existence) but cannot on its
+   own argue *against* it. The against-decision requires the diverse
+   portfolio below.
+
+   **Metrics and analysis** (this stage). Primary estimand: within-pair
    treatment/PLAIN wall-time ratio from the globally randomised,
-   PLAIN-paired schedule. Analysis: seed treated as a random effect;
-   inference by seed-level bootstrap (BCa, ≥10k resamples) and a blocked
-   permutation test as the non-parametric cross-check; method-of-moments
-   components reported descriptively only; raw and load-adjusted both
-   reported. Smallest effect of interest: 1% (the AFL++ case that
-   motivated this project claimed 3.7%). Decision rule for "the cheap
-   route is sufficient": the padding between-seed σ_b (as % of mean),
-   upper 95% bound, is **< 0.5%** on both benchmarks under K-seed
-   blocking — i.e. averaging over 15+ seeds controls the layout lottery
-   to well under the smallest effect of interest — AND the DieHard arm
-   shows no unexplained variance inflation. Decision rule for "the port
-   pays": Stabilizer arms must *both* (a) deliver calibrated inference —
-   assessed by whether its within-run distribution supports the
-   parametric shortcut it promises (normality of its samples, or
-   demonstrated CI coverage under resampling) — and (b) cost overhead
-   **< 25%** on these benchmarks; at the measured ~2× preliminary
-   overhead, K-seed blocking plus non-parametric analysis buys the same
-   protection for less compute unless (a) is strongly positive. The
-   normality comparison must respect aggregation symmetry (compare
-   like-with-like: per-run samples vs per-run samples, per-seed means vs
-   per-epoch means where extractable), not raw Shapiro p-values across
-   differently-aggregated distributions. Capability constraints recorded
-   as gate inputs, not footnotes: no threads, no TLS workloads, no C++
-   unwinding through relocated frames, debugger-hostile, unhardened
-   binaries only. If the gate says "cheap route sufficient", the honest
-   deliverable is BASELINE.md + upstreaming the harness improvements,
-   and the port stops at "preserved, working, documented".
+   PLAIN-paired schedule. Inference: seed as a random effect; seed-level
+   BCa bootstrap (≥10k) plus a blocked permutation cross-check;
+   method-of-moments components descriptive only. **Report the bootstrap
+   CI *width* of σ_b against the 0.5%-of-mean line, and call any result
+   whose CI straddles it INDETERMINATE** rather than forcing a verdict
+   (DeepSeek's point: the pilot already sat near the boundary with wide
+   uncertainty). Normality comparisons must respect aggregation symmetry
+   (per-run vs per-run, per-seed-means vs per-epoch-means), never raw
+   Shapiro across differently-aggregated distributions. Smallest effect
+   of interest: 1% (the motivating AFL++ case claimed 3.7%); 0.5% σ_b
+   threshold = half that, so 15+-seed blocking drives layout noise well
+   under it.
+
+   **The actual resurrection decision** needs a diverse workload
+   portfolio, not these two: SPEC CPU2017 single-threaded subset, at
+   least one genuinely multi-threaded workload, and one C++/exception
+   workload — precisely the axes the port does not yet support, so that
+   evaluation is gated behind the port debt in §3.2, not runnable today.
+   Overhead is workload-dependent (the ~2× seen here is on the worst-case
+   short call-heavy programs; the paper's <7% was SPEC median), so the
+   overhead question is likewise open until the portfolio runs — do not
+   read ~2× as a settled fail. Capability constraints (threads, TLS,
+   unwinding, hardened targets, debugger support) are decision inputs,
+   not footnotes: a port that never clears them is not a general tool
+   however the variance numbers land. If the diverse portfolio shows the
+   cheap route sufficient, the honest deliverable is BASELINE.md + the
+   upstreamed harness improvements, and the port stops at "preserved,
+   working, documented" — itself a worthwhile outcome.
 2. **Probe the parsa runtime's tractability — COMPLETE, answer:
    tractable.** All three characterised crashes root-caused and fixed
    same-day (`~/prog/stabilizer-parsa-fix/`, commits `f9ed534` `29afeef`

@@ -1,0 +1,18 @@
+The gate’s decisive‑ness collapses when you try to stretch it beyond the two canned benchmarks. Its entire “cheap route sufficient” branch rests on a **0.5% upper bound for between‑seed sigma** estimated from only `libquantum` and `bzip2` (both single‑threaded, tiny, call‑heavy C programs). Whether layout variance can be crushed below that bound on *those two* tells you nothing about whether the cheap lld‑padding + DieHard cocktail works on real, diverse workloads. The decision to abandon the full port (or not) cannot be reliably taken from such an under‑powered experiment – that makes the gate unsound in the “generalisation” sense and thus not a well‑posed rule for the overall resurrection decision.
+
+Workload‑space under‑powering is blatant in the document itself:  
+- The only benchmarks are `libquantum` (from the original repo) and `bzip2` (a preliminary reversed‑result run). No mention of multi‑threaded code, I/O‑bound programs, large C++ code with EH, or anything broader.  
+- The gate’s pre‑registered criteria say “on both benchmarks” – so the experiment designer is free to pick the two that are most favourable. If the cheap route passes on two cherry‑picked workloads, the gate declares it “sufficient” without any check that the result holds elsewhere. That makes the gate **gameable by choice of benchmark**.
+
+**Proposed DECISIVE measurement** (refutes generalisability):  
+Run the exact baseline design (global randomisation, paired schedule, padding seeds, DieHard arm) on a suite of **at least 10 diverse, realistic workloads** (e.g., SPEC CPU 2017 single‑threaded benchmarks, plus a couple of multi‑threaded ones if the infrastructure allows). Compute the between‑seed sigma_b and its BCa 95% upper bound for each.  
+*Prediction if the gate is unsound*: several benchmarks will show σ_b > 0.5 % of mean, even after 15‑seed blocking. The cheap route therefore fails on those benchmarks, proving the gate’s binary decision from only two benchmarks is misleading.  
+*If the gate were sound*: σ_b should stay ≤ 0.5 % on all benchmarks, lending credibility.  
+Run this and report the number of benchmarks that violate the threshold.
+
+**Proposed EXPLORATORY measurement** (probes the statistical stability of the current gate):  
+For the existing `libquantum` pilot data (or the running v2 batch), compute the bootstrap distribution of σ_b (using the same BCa method) and report its 95% confidence interval width relative to the threshold. If the interval is wide (e.g., [0.2 %, 0.9 %]), then the boundary is too noisy to be decisive with the current sample size – the gate could flip on a re‑run. The `recompute_pilot_stats.py` already hinted at marginal p‑values; widening the CI will expose how indeterminate the “under 0.5 %” call really is.
+
+The 0.5 % threshold itself is not the core problem (it is anchored to the declared smallest effect of interest of 1 %). The core problem is that **two benchmarks cannot support a general conclusion about layout‑variance control** – they are a convenience sample from the very tool’s own test suite, not a representative workload portfolio. The gate is therefore not decisive for the *actual* decision (commit to port or not) and is easily gamed by selecting amenable workloads.
+
+VERDICT: REFUTED — the gate’s workload coverage is too narrow to be a sound decision rule for the overall resurrection commitment.

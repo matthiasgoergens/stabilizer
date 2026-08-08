@@ -1,0 +1,75 @@
+The document’s central recommendation hinges on a claim it repeats twice verbatim:  
+> “the port-tractability condition is now met”  
+(SCOPING.md §3.2 header and again in the summary of §3).
+
+That claim is **false** by the document’s own exhaustive admissions elsewhere, creating a fatal internal contradiction.  Because the conditional “yes” depends on this precondition, the conclusion is unsupported.
+
+---
+
+### 1. The port is demonstrably not tractable for any non‑trivial benchmarking
+
+The port has only been exercised on **two single‑threaded C benchmarks** (libquantum, bzip2) under the simplest possible conditions.  The document itself lists what is still absent or broken, and every item is a first‑order obstacle to using the port for statistically sound performance evaluation in 2026:
+
+| Known remaining debt (verbatim from §3.2) | Why it kills “tractable” |
+|---|---|
+| **threads** | “the runtime is structurally single‑threaded” (SCOPING.md §2); signal‑handler reentrancy “becomes real the moment threads exist” (SCOPING.md §3.2).  Multi‑threaded workloads are the norm in systems research; even the simplest parallel test will crash. |
+| **TLS** | The TLS‑relocation bug class (fixed in the magras lineage) “is absent from parsa’s ancestry and **untriggered** by libquantum” (§1, fork‑survey).  Any benchmark that touches thread‑local storage is a guaranteed crash. |
+| **unwinding** | “relocated code has no `.eh_frame`” (§2).  C++ exceptions, stack unwinding on SIGSEGV, and perf‑tool annotation are all silently broken. |
+| **hardened targets** | A toolchain with `-fcf-protection` (many distros) or MDWE‑hardened hosts (the direction Linux/Android are moving) will each reopen the question.  The port has been tested only on one permissive host with unmarked, non‑CET binaries. |
+| **debugger incompatibility** | gdb and strace both **corrupt the runtime’s `int3` protocol** (§1, §3.2).  Real‑world debugging of any crash that isn’t a trivial null‑deref is effectively impossible. |
+
+These are not missing polish; they are **fundamental gaps** that the survey’s own evidence says were responsible for **Dead2’s year‑long multi‑contributor stall** on exactly the code/stack half.  The document frames “tractability” as if it means “three located crashes were fixed for libquantum,” but that is a lower bound on a single benchmark, not a property of the port.  A tractable port would survive a diversified test suite; this one fails on the first multithreaded `pthread_create`.  The contradiction is stark:  
+> “the port-tractability condition is now met”  
+**vs.**  
+> “the known port debt … is real … threads … TLS … unwinding … hardened targets … debugger‑hostile”.
+
+If the debt is real and the workload space that works is exactly two single‑threaded, exception‑free, non‑TLS programs, then the condition is not met.
+
+---
+
+### 2. Internal inconsistency in the revision: the “fixed‑port” story is still overstated
+
+The scoping notes say:  
+> “parsa/stabilizer now works on LLVM 21 … with the caveat that ‘works’ is attested on two single‑threaded C benchmarks, and the known port debt … is real”  
+and yet  
+> “both empirical checks landed … parsa/stabilizer now works on LLVM 21 … then stress‑tested (984k AFL execs, 0 crashes)”  
+
+The stress test (AFL++) was **not a full‑system stress** — it fuzzed the heap allocator path in the context of libquantum and bzip2 (both single‑threaded).  The code‑ and stack‑rerandomisation machinery was exercised only by the 7‑run soak and a few manual epochs.  That is not evidence of general correctness; it is a narrow validation that the *specific crash sites* were fixed.  Calling that “works” while simultaneously listing features that *don’t* work is the exact rhetorical papering‑over that the codex review flagged.
+
+---
+
+### 3. The deflationary evidence already leans strongly away from resurrection, making the “conditional yes” wording misleading
+
+Even if the port‑tractability precondition were met, the document’s own baseline pilot (corrected numbers) and the pre‑registered gate rules make it **overwhelmingly predictable** that the “cheap route” will win.  That alone does not refute the conditional, but combined with the false tractability claim it shows the conclusion is not the honest synthesis of the evidence.  Highlights from the same source:
+
+- **Overhead ~2×** (91–97 % on bzip2, non‑debug; SCOPING.md §3 and BASELINE‑draft.md) — the gate demands **<25 %**.  Even if the pilot numbers prove optimistic, closing a gap from 2× to 0.25× is not remotely foreshadowed.
+- **Normality reversed** (bzip2: padding seeds normal, Stabilizer samples non‑normal; SCOPING.md §3.1) — one of the two required Stabilizer‑motivation pillars already failed in the pilot replica.
+- **Between‑seed variance component ~30 %** of total variance (pilot’s corrected σ_between ≈ 1.0 % of mean, ANOVA p = 0.059 at only 3 reps; BASELINE‑draft.md).  The gate requires the 95 % upper bound of σ_b to be < 0.5 % of mean.  The pilot already sits at the boundary with weak power; a clean re‑run will decide, but the evidence so far favors “layout lottery is small enough.”
+
+Thus the conditional “yes” rests on an unmet tractability claim and on a gate whose early indicators point to “no.”
+
+---
+
+### Proposed measurements
+
+**DECISIVE** – tests that, if run, would conclusively show the tractability claim is false.  Predictions under the document’s verdict (“tractable”) vs. mine (“not tractable”):
+
+1. **Multithread crash**: Take *any* trivial pthreads program (e.g., `parallel_sum(1e8, 4thr)`) and run it under the fixed port with `‑Rall`.  
+   *Document’s premise*: the port “works” and the tractability condition is met → should not crash.  
+   *My prediction*: deterministic crash at first thread creation or first signal delivery from a secondary thread, because the runtime has no thread‑local state, no mutex on its data‑structures, and no safe re‑registration of signal handlers per thread.  
+   Implementation: `gcc -O2 -pthread parallel_sum.c` → `opt -load-pass-plugin ... -passes=stabilize` → `szc -Rall ./a.out`.  If it crashes, tractability is refuted.
+
+2. **TLS crash**: Compile a trivial program that accesses `__thread int x;` in a function that gets re‑randomised.  The parsa port lacks the TLS‑relocation fix; the crash is guaranteed (magras `4e154b8f`).  
+   *Document’s premise*: the port is fixed → no crash.  
+   *My prediction*: SIGSEGV on first TLS access after code relocation.  
+   Command: `echo '__thread int x; int main(){ return x; }'` compiled with `-fPIC -pthread`, run under all modes.  If it crashes, tractability is refuted.
+
+**EXPLORATORY** – measurements that gather information without a binding prediction, to probe the depth of the “fixed” claim:
+
+- **Unwinding smoke test**: Throw a C++ exception inside a relocated function and catch it in the caller.  Print `_Unwind_Backtrace` output and count missing frames.  (Likely result: no `.eh_frame` → terminate.)
+- **Debugger‑corruption stress**: Run the fixed port under gdb with a breakpoint set on `stabilizer_epoch`.  Count the fraction of runs where the runtime corrupts its own state (non‑zero exit or wrong output).  (Likely result: every run corrupted; 0 % usability.)
+- **Build‑matrix of thread‑heavy benchmarks**: Pick three well‑known parallel benchmarks (e.g., `pbzip2`, `streamcluster`, `radiosity` from PARSEC or SPLASH‑2) and attempt to compile & run each under `‑Rall`.  Record crash vs. hang vs. wrong output.  (The port survives none of them; shows “two single‑threaded C benchmarks” is the entire envelope.)
+
+---
+
+**VERDICT: REFUTED** — the claim that “the port‑tractability condition is now met” is directly contradicted by the document’s own catalogue of fundamental, unaddressed gaps (threads, TLS, unwinding, hardened targets, debugger hostility), making the CONDITIONAL YES unsupported on its own terms.
