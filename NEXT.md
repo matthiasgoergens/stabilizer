@@ -9,15 +9,18 @@ cumulative *full* PSI memory stall, 51 GiB swap used, `overcommit_memory=0`
 (cgroup 2914/153301), no visible OOM-kill (dmesg/journal root-restricted).
 **Mitigation: cap concurrent heavy agents/containers (~2–3, not 5+).**
 
-## Live on parsa/stabilizer (both verified + two-family reviewed)
+## Live on parsa/stabilizer (all verified + two-family reviewed)
 - **#1** getRandomByte OOB → fixes `-Rstack` (branch `llvm21-rng-fix`).
 - **#2** ShuffleFreeGuard → fixes `-Rheap` + deterministic `-Rcode` sweep
   crash (branch `llvm21-heap-fixes`).
-- Our fork `matthiasgoergens/stabilizer` carries these branches +
-  `llvm21-fixes` (all 5) + `llvm21-timer-fix` (partial teardown).
-- Scoping repo `~/prog/stabilizer` master pushed through `b97ecf0`.
+- **#3** disarm timer at teardown + sa_mask → fixes intermittent exit-time
+  `-Rcode` fault (branch `llvm21-timer-fix`). Depends on #1/#2. Scope
+  settled by measurement: untrap protocol NOT shipped (no measurable
+  benefit — see `scoping-notes/pr3-scope-finding.md`).
+- The three are a stack; full `-Rcode` reliability needs all three.
+- Our fork carries these + `llvm21-fixes` (all 5). Scoping repo pushed.
 
-## Bug #4 (teardown race) — fix implemented, NOT yet verified/posted
+## Bug #4 (teardown race) — DONE, posted as PR #3 (see above). Below is history.
 - Symptom: SIGALRM/SIGTRAP after `stabilizer_main` returns runs onTimer/
   onTrap against torn-down code → fault. Partial fix (onTimer only) was
   `b274f86`; both codex+deepseek found onTrap is an unguarded sibling.
