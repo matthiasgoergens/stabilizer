@@ -58,3 +58,22 @@ heap-corruption case aborts on the program's own bug before onTrap.
 **Decision: PR3 = onTimer teardown fix + sigemptyset(sa_mask). Untrap not
 shipped.** Both families' positions reconciled by the measurement; codex's
 scope confirmed.
+
+## Post-decision vindication (2026-08-09)
+
+The teardown agent, continuing on the (unshipped) untrap protocol, found
+that its first untrap implementation (`49ffde3`) was **itself buggy —
+20/20 crashes on the teardown probe**: untrap()'s "restore original bytes"
+path is unsafe for never-relocated functions (their compiled prologue's
+relocation-table reference is only valid post-relocation). A corrected
+version (`becfc86`, routing never-relocated functions through the same
+relocate() path onTrap uses) is 20/20 clean. It also re-confirmed the
+shipped code: **b274f86 (onTimer-only) is 20/20 clean on the probe.**
+
+So not shipping untrap was doubly correct: it fixes nothing reproducible
+AND its obvious implementation introduced a fresh 20/20 crash. Shipping the
+"complete protocol" would have handed the maintainer a new bug. The
+corrected untrap (`becfc86`, in `~/prog/stabilizer-teardown-fix/stabilizer`)
+is archived, not shipped — available only if a future dlclose/unmap use
+case ever justifies it. This is the "minimal proven fix beats the elegant
+complete one" lesson, measured.
