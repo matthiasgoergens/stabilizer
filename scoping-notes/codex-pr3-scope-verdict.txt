@@ -1,0 +1,11 @@
+The new probe overturns my earlier `onTrap` objection.
+
+(a) Sound. In Stabilizer’s normal single-threaded exit path, a trapped function’s original text and the runtime state used by `onTrap` remain live while `atexit` callbacks and static destructors run. An `int3` can therefore relocate and forward normally. Normal process exit does not unmap executable/DSO text before its finalisers run. The pathological `dlclose` example is not a counterexample the untrap protocol fixes: if code has already been unmapped, instruction fetch faults before reaching its `int3`; calling that pointer is already invalid.
+
+(b) Yes, with the stated observation. Exit 0 alone is not proof, but “entry byte was still `int3`, the function body executed, and no tracer intercepted SIGTRAP” proves `onTrap` handled and redirected the trap successfully.
+
+One nuance for the PR wording: an `onTrap` reached with `rerandomizing == true` can call `setTimer(interval)` again. The shutdown guard still makes that later alarm harmless, but describe the result as “disarm the outstanding timer and make later timer delivery a no-op”, not as a permanent guarantee that no timer can ever be rearmed.
+
+(c) The minimal, measured fix is the right maintainer-facing change. Include `sigemptyset(&sa.sa_mask)`. Keep untrapping as optional shutdown hardening, not as a fix for a demonstrated ordinary-exit fault; do not claim that `onTrap` itself was a bug merely because it can run during teardown. Threaded/concurrent unmapping and explicit `munmap` remain outside this single-threaded model, as does executing stale code after `dlclose`.
+
+CONFIRMED (ship onTimer-only)

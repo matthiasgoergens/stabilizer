@@ -1,0 +1,61 @@
+The claim that the onTimer-only fix (b274f86) is **correct and complete** for normal programs relies on the probe `teardown_probe.cpp` showing exit 0 and the function executing past its int3. That proof is valid **only** for the narrow case where teardown has **no other activity that touches the runtime’s internal state** — particularly the data heap and the `live_functions` set. The `onTrap` handler path performs a relocation that:
+
+- reads `FunctionHeader` from memory just before the trap (`libstabilizer.cpp:onTrap` – line `FunctionHeader* h = (FunctionHeader*)c.ip();`),
+- allocates from the custom heap via `Function::relocate()` (which eventually calls `getDataHeap()->malloc`),
+- inserts a value into the global `live_functions` set.
+
+None of these operations are guarded by a teardown-aware check. If any other atexit handler or destructor has already damaged the heap (e.g., double-free, heap corruption from a failed `stabilizer_free` in a static object’s destructor), then a subsequent onTrap during teardown would:
+
+1. attempt to allocate memory from a compromised heap → undefined behaviour / segfault,
+2. access a `FunctionHeader` that may reside in a page whose permissions have been changed by a previous destructor’s munmap or mprotect (unlikely in a single-threaded normal exit, but not impossible if the program uses custom memory mappings).
+
+The probe completely avoided such interactions — it had no statically-allocated objects, no heap usage inside atexit, and only a single, isolated call to the trapped function. Therefore the probe’s 20/20 clean result is **not sufficient** to conclude that `onTrap`-during-teardown is benign for every normal program shape; it only demonstrates safety in one trivial configuration.
+
+### Decisive measurement
+
+Create a normal program that:
+
+- allocates a block with `stabilizer_malloc(size)` and stores it in a global,
+- defines a **static** object whose destructor calls `stabilizer_free(ptr)` twice (corrupting the internal heap metadata),
+- registers an `atexit` handler that calls a **never-relocated, still-trapped** function (exactly like the probe).
+
+Compile with Stabilizer’s `-Rcode` and run multiple times.  
+**Prediction under the claim**: The process exits cleanly (exit 0) every time — the heap corruption does not affect onTrap.  
+**Opposite outcome**: The process crashes (SIGSEGV/abort) inside onTrap’s call to `Function::relocate` due to a corrupt heap, proving the untrap protocol is needed.
+
+```c
+// decisive_heap_corruption.c
+#include <stdlib.h>
+#include <stdio.h>
+
+extern void* stabilizer_malloc(size_t);
+extern void stabilizer_free(void*);
+
+static void* doomed;
+
+__attribute__((destructor))
+static void corrupt_heap(void) {
+    stabilizer_free(doomed);
+    stabilizer_free(doomed);   // double-free; heap becomes inconsistent
+}
+
+void trapped_func(void) { puts("teardown"); }
+
+int main(void) {
+    doomed = stabilizer_malloc(1024);
+    atexit(trapped_func);
+    return 0;
+}
+```
+
+Run under the onTimer-only build (commit b274f86) with code randomization enabled.
+
+### Exploratory measurements
+
+1. **Dump heap state at the start of `onTrap`** – modify the runtime to call a helper that walks the data heap’s freelist/allocator structure and prints it. Capture the output when the probe (or the above test) invokes onTrap during teardown.  
+2. **Trace all signal deliveries** – log `si_signo`, `si_addr`, and the current `shutting_down` flag for every signal caught by `onTrap` and `onFault` during exit, to verify exactly what fires and when.  
+3. **Probe the `live_functions` set** – insert `fprintf(stderr, "live_functions size after insert in teardown: %zu\n", live_functions.size());` after `live_functions.insert(f);` inside `onTrap`. Check if any other path later iterates over this set during exit (which would read freed memory if a destructor had destroyed the contained `Function*`).
+
+These measurements will show whether heap or registry mutations during teardown cause silent state corruption that the current probe missed.
+
+VERDICT: UNVERIFIABLE — the supplied evidence (trivial probe) is too weak to prove that the onTrap path is harmless for all normal programs; without testing heap-interacting teardown code, the claim of completeness stands on a single, sanitised example.
