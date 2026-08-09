@@ -44,13 +44,17 @@ cumulative *full* PSI memory stall, 51 GiB swap used, `overcommit_memory=0`
   `~/prog/stabilizer/scoping-notes/pr3-timer-FINAL.md`, will need updating
   to describe the complete protocol, not just the timer).
 
-## Bug #5 (NEW, out of scope, unfixed) — record, don't chase yet
-Text-relocation-patching corruption on tiny / C++-static-object-heavy
-`-Rcode` binaries: a wrong static PC32 relocation baked in at link time
-(hypothesis: GOT/PLT relaxation desyncing with `--emit-relocs`). Found by
-the teardown agent's synthetic minimal test. Evidence (readelf/nm/objdump)
-archived at `~/prog/stabilizer-teardown-fix/stabilizer/teardown-notes/
-synthetic-test-tripped-separate-bug/`. Real bug; a future PR candidate.
+## Bug #5 — ROOT-CAUSED (2026-08-09), not a PR yet. See scoping-notes/bug5-findings.md
+-Rcode corruption on tiny/C++-static-heavy binaries. Repro deterministic
+(`~/prog/stabilizer-bug5/repro/teardown.cpp`). Initial lld-relaxation
+hypothesis REFUTED by objdump/readelf; bug is in Stabilizer's own runtime.
+THREE defects (codex-confirmed): 5a applyTextRelocs internal/external test
+keys on S not S+A (FIX COMMITTED in bug5 repo, safe, insufficient alone);
+5b 32-byte FunctionHeader overwrites the next function when thunks are
+16 B apart (structural); 5c code.size() from a linker-reordered dummy
+underflows (structural). Alignment hack fixed 5b but activated 5c →
+reverted. **Decision pending: (a) report to parsa as an issue + offer 5a;
+(b) do the 5b/5c redesign then PR; (c) hold.** Issue text needs approval.
 
 ## Done this session (committed + pushed unless noted)
 - SCOPING.md: conditional/deflationary recommendation, adversarially
