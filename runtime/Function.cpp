@@ -123,14 +123,26 @@ void Function::applyTextRelocs(void* source, void* dest) {
             case R_X86_64_PC32:
             case R_X86_64_PLT32:
             {
-                // Relocation semantics: S + A - P
-                // Derive S from the already-relocated field value.
-                intptr_t S = (intptr_t)oldVal + (intptr_t)oldP - (intptr_t)r.addend;
+                // Relocation semantics for a pc-relative field: stored value is
+                // S + A - P, so S + A = oldVal + oldP is the ELF relocation value
+                // (the resolved reference address, modulo the x86 RIP +4/+trailing
+                // adjustment). Test THIS against the copied range, NOT the bare
+                // symbol value S = oldVal + oldP - addend. References to the
+                // function's own adjacent relocation table are emitted against the
+                // .text SECTION symbol plus a large addend, so S is the section
+                // base (outside the function) while S + A is the table (inside).
+                // Keying the internal/external decision on S misclassifies these
+                // internal table references as external and rewrites them,
+                // corrupting the relocated copy. (Caveat: S + A is ~4 bytes short
+                // of the true x86 effective address; a reference to the very first
+                // or last few bytes of the copied region could still be
+                // misclassified. Not exercised by the known reproducers.)
+                intptr_t target = (intptr_t)oldVal + (intptr_t)oldP;
 
                 // If the target is within our copied allocation, leave it alone
                 // so it continues to resolve into the relocated copy (including
                 // the adjacent relocation table).
-                if((uintptr_t)S >= internal_begin && (uintptr_t)S < internal_end) {
+                if((uintptr_t)target >= internal_begin && (uintptr_t)target < internal_end) {
                     break;
                 }
 
