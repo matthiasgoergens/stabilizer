@@ -1,13 +1,28 @@
-# Evidence manifest — where the out-of-repo validation lives
+# Evidence manifest — where the resurrection validation lives
 
 Codex's scoping review (2026-08-08, `codex-scoping-verdict.txt`) correctly
-noted that much of SCOPING.md's load-bearing validation lives under
-`~/prog/...`, not in this repository, so a reader cannot audit it from the
-stated evidence base. This manifest pins those artefacts: paths, key
-revisions, and what each establishes. None of it is on GitHub; it is
-local to Matthias's machine as of 2026-08-08. (The fixes themselves ARE
-published — `matthiasgoergens/stabilizer` branch `llvm21-fixes`, tip
-`6b263a4`.)
+noted that much of SCOPING.md's load-bearing validation lived under
+`~/prog/...`, outside this repository. The five principal narrative reports
+were imported verbatim into `resurrection-evidence/` on 2026-09-08, so their
+text now has Git history. This manifest pins both those copies and the original
+experiment directories containing the raw artefacts. The large logs, build
+trees, containers, and benchmark outputs remain local to Matthias's machine;
+they are not made independently reproducible merely by preserving the reports.
+(The fixes themselves are published on `matthiasgoergens/stabilizer`, branch
+`llvm21-fixes`, tip `6b263a4`.)
+
+## Preserved reports
+
+- `resurrection-evidence/parsa-verify-notes.md` — initial LLVM 21 port
+  verification; source directory `../stabilizer-parsa-verify/`.
+- `resurrection-evidence/parsa-fix-notes.md` — diagnosis and verification of
+  the three runtime fixes; source directory `../stabilizer-parsa-fix/`.
+- `resurrection-evidence/period-container-notes.md` — period-toolchain build and
+  runtime oracle; source directory `../stabilizer-period/`.
+- `resurrection-evidence/bug5-notes.md` — the bug #5 reproducer and root-cause
+  record; source directory `../stabilizer-bug5/`.
+- `resurrection-evidence/threads-design.md` — the Phase 2 concurrency design;
+  source directory `../stabilizer-threads-design/`.
 
 ## The port and its fixes
 - Repo: `~/prog/stabilizer-parsa-fix/stabilizer` (clone of

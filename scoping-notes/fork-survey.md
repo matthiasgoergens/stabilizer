@@ -2,7 +2,7 @@
 
 Date: 2026-08-07. All data below is grounded in `gh api` calls made during this
 session; raw outputs are kept alongside this file in
-`/home/matthias/prog/stabilizer/scoping-notes/` (see file list at the end).
+`/home/matthias/prog/stabilizers/stabilizer/scoping-notes/` (see file list at the end).
 
 ## Headline answer
 
