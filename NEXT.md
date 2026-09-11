@@ -1,81 +1,100 @@
-# NEXT — Stabilizer resurrection (state as of 2026-08-09)
+# NEXT — Stabilizer resurrection (state at 2026-09-11)
 
-**Bash outage (2026-08-09, ~1h) — RESOLVED, root-caused.** Symptom: every
-command (even `true`) returned exit 1, no output = `fork()` failing. Cause:
-memory exhaustion under peak parallelism (several multi-GB agent processes
-+ podman LLVM/Rust builds + baseline batch + AFL at once). Evidence: ~21s
-cumulative *full* PSI memory stall, 51 GiB swap used, `overcommit_memory=0`
-(heuristic overcommit denies fork ENOMEM under pressure). NOT a pid cap
-(cgroup 2914/153301), no visible OOM-kill (dmesg/journal root-restricted).
-**Mitigation: cap concurrent heavy agents/containers (~2–3, not 5+).**
+## Goal
 
-## Live on parsa/stabilizer (all verified + two-family reviewed)
-- **#1** getRandomByte OOB → fixes `-Rstack` (branch `llvm21-rng-fix`).
-- **#2** ShuffleFreeGuard → fixes `-Rheap` + deterministic `-Rcode` sweep
-  crash (branch `llvm21-heap-fixes`).
-- **#3** disarm timer at teardown + sa_mask → fixes intermittent exit-time
-  `-Rcode` fault (branch `llvm21-timer-fix`). Depends on #1/#2. Scope
-  settled by measurement: untrap protocol NOT shipped (no measurable
-  benefit — see `scoping-notes/pr3-scope-finding.md`).
-- The three are a stack; full `-Rcode` reliability needs all three.
-- Our fork carries these + `llvm21-fixes` (all 5). Scoping repo pushed.
+Make Stabilizer reliable enough to improve performance investigations in
+`~/prog/lean/faster-lean`; use lean-zip as the first flagship layout-sensitive
+application. The immediate target is Linux x86_64 with LLVM 21, not the broad
+platform support claimed by the inherited README (user direction, 2026-09-11;
+`ROADMAP.md:1-14`; `~/prog/lean/faster-lean/NEXT.md`).
 
-## Bug #4 (teardown race) — DONE, posted as PR #3 (see above). Below is history.
-- Symptom: SIGALRM/SIGTRAP after `stabilizer_main` returns runs onTimer/
-  onTrap against torn-down code → fault. Partial fix (onTimer only) was
-  `b274f86`; both codex+deepseek found onTrap is an unguarded sibling.
-- **Complete protocol committed** at `~/prog/stabilizer-teardown-fix/
-  stabilizer`, branch `teardown-protocol`, commit `49ffde3` (on b274f86):
-  `Function::untrap()` (restores forwarding jump or saved header) called
-  over all functions in wrapper main after stabilizer_main returns;
-  `sigprocmask(SIG_BLOCK, SIGALRM)`; `sigemptyset(&sa.sa_mask)` in
-  setHandler. Residual: 1-instruction window before the block (harmless,
-  documented).
-- Verified so far: 2 clean post-fix runs of a deterministic teardown probe
-  (atexit calls an instrumented fn; both "never-relocated/trapped" and
-  "already-forwarded" cases), stdout matched libquantum(851,2). Logs in
-  `~/prog/stabilizer-teardown-fix/.../teardown-notes/run-03*`.
-- ⛔ STILL NEEDED before PR3: pre-fix baseline fault-rate on b274f86 (for
-  contrast); ≥20 repeats of the teardown probe; ≥20 libquantum
-  `-Rcode -Rheap` non-regression (must stay 0 aborts like b274f86's 20/20);
-  oracle byte-diff; commit `teardown_probe.cpp` + the `shor.c` probe call
-  site + NOTES.md (currently uncommitted); then codex+deepseek on the diff;
-  then create branch from 2bffc191c9 and post PR3 (text draft:
-  `~/prog/stabilizer/scoping-notes/pr3-timer-FINAL.md`, will need updating
-  to describe the complete protocol, not just the timer).
+## Verified state
 
-## Bug #5 — ROOT-CAUSED (2026-08-09), not a PR yet. See scoping-notes/bug5-findings.md
--Rcode corruption on tiny/C++-static-heavy binaries. Repro deterministic
-(`~/prog/stabilizer-bug5/repro/teardown.cpp`). Initial lld-relaxation
-hypothesis REFUTED by objdump/readelf; bug is in Stabilizer's own runtime.
-THREE defects (codex-confirmed): 5a applyTextRelocs internal/external test
-keys on S not S+A (FIX COMMITTED in bug5 repo, safe, insufficient alone);
-5b 32-byte FunctionHeader overwrites the next function when thunks are
-16 B apart (structural); 5c code.size() from a linker-reordered dummy
-underflows (structural). Alignment hack fixed 5b but activated 5c →
-reverted. **Decision pending: (a) report to parsa as an issue + offer 5a;
-(b) do the 5b/5c redesign then PR; (c) hold.** Issue text needs approval.
+- The three earlier fixes remain open, cleanly mergeable PRs against Parsa:
+  RNG [#1](https://github.com/parsa/stabilizer/pull/1), heap/code free
+  [#2](https://github.com/parsa/stabilizer/pull/2), and timer teardown
+  [#3](https://github.com/parsa/stabilizer/pull/3). None has comments or reviews
+  (`gh api repos/parsa/stabilizer/pulls?state=open`, exit 0, 2026-09-11).
+- Bug #5 is fixed locally in `~/prog/stabilizer-bug5/stabilizer`, commits
+  `c6ccb07` (5a relocation classification) and `2936cb6` (5b/5c redesign and
+  regression), on `master` two commits ahead of `origin/master`
+  (`git status --short --branch`, exit 0).
+- The fix removes linker-adjacent dummy/code-limit assumptions, obtains final
+  function extents from ELF `STT_FUNC` sizes, validates all metadata before
+  patching entries, and reserves an explicit 32-byte patchable entry. Relocated
+  copies omit the entry padding; x86_64 forwarding is one checked `jmp rel32`.
+  CET branch protection, stripped symbol tables, duplicate function addresses,
+  invalid extents and ambiguous boundary relocations fail explicitly
+  (`2936cb6`, chiefly `pass/Stabilizer.cpp`, `runtime/Function.h`,
+  `runtime/TextRelocations.cpp`, and `runtime/Jump.h`).
+- The new `tests/CodeLayout` regression includes small C++ functions, global
+  construction/destruction and a call after the 500 ms re-randomisation epoch.
+  It failed against the old design with exit 134 and passes after `2936cb6`;
+  ten repeated epoch-crossing runs also passed
+  (`~/prog/stabilizer-bug5/logs/`; measured 2026-09-11).
+- The original deterministic teardown reproducer now emits all five expected
+  lines. `llvm-nm` confirms that no `stabilizer.dummy.*` symbols remain
+  (`~/prog/stabilizer-bug5/repro/teardown.cpp`; measured 2026-09-11).
+- The final full suite passed after the CET guard: HelloWorld, CodeLayout,
+  libquantum and bzip2 (`podman exec bug5-fix make --directory
+  /work/stabilizer test`, exit 0, 2026-09-11). A stripped-binary negative
+  control and a CET-enabled compile both failed early with the intended clear
+  diagnostics (measured 2026-09-11).
+- The existing thread design is not implemented. The runtime remains
+  structurally single-threaded; full Rust, and likely realistic Lean workloads,
+  require deliberate thread/TLS/unwinding validation (`ROADMAP.md:56-96`).
+- The faster-lean harness already identifies layout as a nuisance and supports
+  independently shuffled blocks. Its current experiments use one linked layout;
+  its `NEXT.md` names layout-seed replication and Stabilizer compatibility as
+  the next measurements (`~/prog/lean/faster-lean/NEXT.md`, read 2026-09-11).
 
-## Done this session (committed + pushed unless noted)
-- SCOPING.md: conditional/deflationary recommendation, adversarially
-  reviewed (codex WEAKENED→addressed, 2× deepseek), pre-registered gate.
-- BASELINE.md (`~/prog/stabilizer-baseline`): load-robust design validated
-  (63% load CV → within-pair ratio r~0); cheap route ~0% overhead,
-  Stabilizer ~2–2.7×; between-seed variance below gate on bzip2,
-  indeterminate on libquantum; normality NOT claimed (needs dedicated
-  stable-load test). Follow-ups: dedicated normality run; padding-seed
-  build only made 15/20.
-- ROADMAP.md: Rust north star. Phase 1 spike + Phase 1b real szc `-lang=rust`
-  frontend DONE (single-threaded panic=abort, all modes, global_allocator
-  live; `~/prog/stabilizer-rust-frontend`). Phase 2 threads DESIGN done
-  (`~/prog/stabilizer-threads-design/DESIGN.md`, Shuffler-based). Phase 3/4
-  pending.
-- FOLLOW-UPS.md: phantom-speedup archaeology; Mesh AFL++; old-papers-mine.
+## Maintenance reality
 
-## Next actions when Bash returns, in order
-1. Commit this NEXT.md (scoping repo) + push.
-2. Finish bug-#4 verification (⛔ list above); if clean, codex+deepseek the
-   diff, then post PR3.
-3. Consider bug #5 as its own investigation/PR.
-4. Baseline follow-ups (dedicated normality experiment; fix padding-seed
-   build) if continuing the measurement thread.
+- Canonical
+  [`ccurtsinger/stabilizer`](https://github.com/ccurtsinger/stabilizer) says it
+  is no longer actively maintained. Its last code-affecting commit was
+  in 2016; 2021 only updated documentation/licences (`gh api
+  repos/ccurtsinger/stabilizer/commits`, exit 0, 2026-09-11).
+- [`parsa/stabilizer`](https://github.com/parsa/stabilizer) is the strongest
+  LLVM 21 base, but its last push was 2026-02-14 and the three August PRs have
+  received no response (`gh api repos/parsa/stabilizer`, exit 0, 2026-09-11).
+- The earlier community fork
+  [`Dead2/stabilizer`](https://github.com/Dead2/stabilizer) last pushed in 2023
+  (`gh api repos/Dead2/stabilizer`, exit 0, 2026-09-11).
+- Operational conclusion: Matthias should act as de facto technical maintainer
+  of the resurrection—releases, CI, triage, compatibility policy and docs—while
+  continuing to offer changes to Parsa. This is not formal upstream ownership.
+
+## Refutations and boundaries
+
+- The old bug-#5 hypothesis that lld relocation relaxation caused the corruption
+  was refuted by matching disassembly and relocation records; the faults were
+  Stabilizer's adjacent-layout assumptions
+  (`scoping-notes/bug5-findings.md:12-38`).
+- Bug #5 passing C/C++ tests does not establish Lean compatibility, thread
+  safety, low overhead, statistical normality or improved investigation
+  productivity. None has yet been measured on a Lean artefact.
+
+## Cross-model review
+
+Three high-effort Codex reviews ran. The first exposed a portability assertion
+and the second an ENDBR/CET mismatch; both were fixed. The final review found no
+actionable regression and ran runtime syntax checks plus all four test binaries
+(`~/prog/stabilizer-bug5/logs/codex-bug5-fix-review-{1,2,3}.txt`).
+
+## Next three actions
+
+1. Rebase/consolidate the LLVM 21 fixes, including `2936cb6`, on a dedicated
+   maintained branch; add CI and document the Linux x86_64 support boundary.
+2. Pre-register and run a minimal Lean compatibility/calibration probe: exact
+   output parity, LLVM/linker compatibility, threads/TLS/unwinding, allocator
+   coverage, sustained re-randomisation and retained per-layout observations.
+3. Apply the resulting treatment ladder to lean-zip/faster-lean: saved-binary
+   controls, linker padding seeds, then Stabilizer code/stack/heap separately,
+   randomised within short blocks with layout—not repeated execution—as the
+   experimental unit.
+
+## Unverified beliefs
+
+Stabilizer may make small Lean effects more identifiable. Parsa may re-engage.
+Treat both as hypotheses until a Lean calibration and an upstream response.
