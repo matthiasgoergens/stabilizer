@@ -35,6 +35,10 @@ std::vector<ctor_t> constructors;
 bool rerandomizing = false;
 size_t interval = 500;
 
+// Set once stabilizer_main returns, so a SIGALRM still in flight during
+// process teardown is a no-op instead of relocating/trapping torn-down code.
+volatile sig_atomic_t shutting_down = 0;
+
 void** topFrame = NULL;
 
 /**
@@ -144,6 +148,15 @@ int main(int argc, char **argv) {
 
     // Call the old main function
     int r = stabilizer_main(argc, argv);
+
+    // Disarm re-randomization before teardown. A SIGALRM delivered after
+    // stabilizer_main returns would run onTimer against state that is being
+    // torn down (the "Placing traps" path writes traps into function memory
+    // that may already be unmapped, faulting in onFault). Set the flag first
+    // so an alarm already in flight is a no-op, then stop the timer.
+    shutting_down = 1;
+    setTimer(0);
+
     DEBUG("Shutting down");
 
     return r;
@@ -234,6 +247,12 @@ void onTrap(int sig, siginfo_t* info, void* p) {
 }
 
 void onTimer(int sig, siginfo_t* info, void* p) {
+    // If the program is tearing down, do nothing: relocating or trapping
+    // functions here races with unmapping of their code.
+    if(shutting_down) {
+        return;
+    }
+
     Context c(p);
 
     DEBUG("Re-randomization timer fired at %p", c.ip());
@@ -282,6 +301,7 @@ void setTimer(int msec) {
 
 void setHandler(int sig, void(*fn)(int, siginfo_t*, void*)) {
     struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
     sa.sa_sigaction = (void(*)(int, siginfo_t*, void*))fn;
     sa.sa_flags = SA_SIGINFO;
     sigaction(sig, &sa, NULL);
