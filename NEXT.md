@@ -15,10 +15,12 @@ platform support claimed by the inherited README (user direction, 2026-09-11;
   [#2](https://github.com/parsa/stabilizer/pull/2), and timer teardown
   [#3](https://github.com/parsa/stabilizer/pull/3). None has comments or reviews
   (`gh api repos/parsa/stabilizer/pulls?state=open`, exit 0, 2026-09-11).
-- Bug #5 is fixed locally in `~/prog/stabilizer-bug5/stabilizer`, commits
-  `c6ccb07` (5a relocation classification) and `2936cb6` (5b/5c redesign and
-  regression), on `master` two commits ahead of `origin/master`
-  (`git status --short --branch`, exit 0).
+- Bug #5 is fixed on the maintained code line in
+  `~/prog/stabilizers/stabilizer-bug5/stabilizer`. Commits `c6ccb07` and
+  `2936cb6` implement the relocation-classification fix and the code-layout
+  redesign; `4767fcc` also incorporates the signal-mask initialisation needed
+  by the LLVM 21 line. A focused upstream branch, `bug5-code-layout`, contains
+  only the two bug-#5 commits rebased directly onto Parsa's `master`.
 - The fix removes linker-adjacent dummy/code-limit assumptions, obtains final
   function extents from ELF `STT_FUNC` sizes, validates all metadata before
   patching entries, and reserves an explicit 32-byte patchable entry. Relocated
@@ -31,10 +33,11 @@ platform support claimed by the inherited README (user direction, 2026-09-11;
   construction/destruction and a call after the 500 ms re-randomisation epoch.
   It failed against the old design with exit 134 and passes after `2936cb6`;
   ten repeated epoch-crossing runs also passed
-  (`~/prog/stabilizer-bug5/logs/`; measured 2026-09-11).
+  (`~/prog/stabilizers/stabilizer-bug5/logs/`; measured 2026-09-11).
 - The original deterministic teardown reproducer now emits all five expected
   lines. `llvm-nm` confirms that no `stabilizer.dummy.*` symbols remain
-  (`~/prog/stabilizer-bug5/repro/teardown.cpp`; measured 2026-09-11).
+  (`~/prog/stabilizers/stabilizer-bug5/repro/teardown.cpp`; measured
+  2026-09-11).
 - The final full suite passed after the CET guard: HelloWorld, CodeLayout,
   libquantum and bzip2 (`podman exec bug5-fix make --directory
   /work/stabilizer test`, exit 0, 2026-09-11). A stripped-binary negative
@@ -80,19 +83,22 @@ platform support claimed by the inherited README (user direction, 2026-09-11;
 Three high-effort Codex reviews ran. The first exposed a portability assertion
 and the second an ENDBR/CET mismatch; both were fixed. The final review found no
 actionable regression and ran runtime syntax checks plus all four test binaries
-(`~/prog/stabilizer-bug5/logs/codex-bug5-fix-review-{1,2,3}.txt`).
+(`~/prog/stabilizers/stabilizer-bug5/logs/codex-bug5-fix-review-{1,2,3}.txt`).
+Kimi K3 independently reviewed the final two-commit fix, rebuilt it against
+LLVM 21, reran all four tests and returned `APPROVE`; its findings were minor
+hygiene and test gaps
+(`~/prog/stabilizers/stabilizer-bug5/logs/kimi-bug5-review.txt`).
 
 ## Next three actions
 
-1. Rebase/consolidate the LLVM 21 fixes, including `2936cb6`, on a dedicated
-   maintained branch; add CI and document the Linux x86_64 support boundary.
-2. Pre-register and run a minimal Lean compatibility/calibration probe: exact
-   output parity, LLVM/linker compatibility, threads/TLS/unwinding, allocator
-   coverage, sustained re-randomisation and retained per-layout observations.
-3. Apply the resulting treatment ladder to lean-zip/faster-lean: saved-binary
-   controls, linker padding seeds, then Stabilizer code/stack/heap separately,
-   randomised within short blocks with layout—not repeated execution—as the
-   experimental unit.
+1. Publish the maintained code-only `master`, preserve these plans on
+   `resurrection-notes`, and offer the focused bug-#5 branch to Parsa.
+2. Pre-register and run the existing faster-lean linker layout-seed
+   replication. Treat each linked layout as the experimental unit and first
+   verify that the seeds cause meaningful address variation.
+3. Run a minimal Stabilizer/Lean compatibility probe: exact output parity,
+   LLVM/linker compatibility, threads/TLS/unwinding, allocator coverage and
+   sustained re-randomisation. Add CI and document the Linux x86_64 boundary.
 
 ## Unverified beliefs
 
