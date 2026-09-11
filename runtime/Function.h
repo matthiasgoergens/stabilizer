@@ -15,10 +15,13 @@
 struct Function;
 struct FunctionLocation;
 
+static const size_t PATCHABLE_ENTRY_SIZE = 32;
+
 struct TextReloc {
     size_t offset;      // Offset from the function base to the relocation field
     uint32_t type;      // ELF relocation type (e.g., R_X86_64_PC32)
     int64_t addend;     // ELF relocation addend (RELA)
+    bool internal;      // The referenced value moves with this function
 };
 
 struct FunctionHeader {
@@ -46,6 +49,11 @@ public:
     }
 };
 
+// The pass reserves PATCHABLE_ENTRY_SIZE bytes at every randomized entry. Fail
+// the build if an architecture/header change would outgrow that contract.
+static_assert(sizeof(FunctionHeader) <= PATCHABLE_ENTRY_SIZE,
+    "increase Stabilizer's patchable entry size");
+
 struct Function {
 private:
     friend class FunctionLocation;
@@ -53,9 +61,7 @@ private:
     MemRange _code;
     MemRange _table;
     FunctionHeader* _header;
-    FunctionHeader _savedHeader;
-    
-    bool _tableAdjacent;    //< If true, the relocation table should be placed next to the function
+    uint8_t _savedHeader[PATCHABLE_ENTRY_SIZE];
     
     uint8_t* _stackPad;		//< The address of the stack pad value for this function
     
@@ -96,18 +102,33 @@ public:
     /**
     * \brief Create a new runtime representation of a function
     * \arg codeBase The address of the function
-    * \arg codeLimit The top of the function
     * \arg tableBase The address of the function's relocation table
     * \arg tableSize The size of the function's relocation table
-    * \arg tableAdjacent If true, the relocation table should be placed immediately after the function
 	* \arg stackPad The address of this function's stack pad size
     */
-    inline Function(void* codeBase, void* codeLimit, void* tableBase, size_t tableSize, bool tableAdjacent, uint8_t* stackPad) :
-        _code(codeBase, codeLimit), _table(tableBase, tableSize), _savedHeader(*(FunctionHeader*)_code.base()) {
-        
-        this->_tableAdjacent = tableAdjacent;
+    inline Function(void* codeBase, void* tableBase, uint32_t tableSize, uint8_t* stackPad) :
+        _code(codeBase, (size_t)0), _table(tableBase, tableSize), _header(NULL) {
         this->_stackPad = stackPad;
         this->_current = NULL;
+    }
+
+    /**
+     * Set the exact final-link function extent obtained from the ELF symbol
+     * table.  This does not modify executable memory.
+     */
+    inline void setCodeSize(size_t size) {
+        _code = MemRange(_code.base(), size);
+    }
+
+    /**
+     * Save and replace the patchable entry only after every function's ELF
+     * metadata and text relocations have been validated.
+     */
+    inline void installHeader() {
+        if(_code.size() <= PATCHABLE_ENTRY_SIZE) {
+            ABORT("Randomized function at %p has no body after its %zu-byte patchable entry (ELF size=%zu)",
+                _code.base(), PATCHABLE_ENTRY_SIZE, _code.size());
+        }
 
         // Make the function header writable
         if(mprotect(_code.pageBase(), _code.pageSize(), PROT_READ | PROT_WRITE | PROT_EXEC)) {
@@ -116,7 +137,7 @@ public:
         }
         
         // Make a copy of the function header
-        _savedHeader = *(FunctionHeader*)_code.base();
+        memcpy(_savedHeader, _code.base(), sizeof(_savedHeader));
         _header = new(_code.base()) FunctionHeader(this);
     }
     
@@ -142,16 +163,20 @@ public:
         return _code.size();
     }
 
-    inline void addTextReloc(size_t offset, uint32_t type, int64_t addend) {
-        _textRelocs.push_back({offset, type, addend});
+    inline void* getCodeBodyBase() {
+        return _code.offsetIn(PATCHABLE_ENTRY_SIZE);
+    }
+
+    inline size_t getCodeBodySize() {
+        return _code.size() - PATCHABLE_ENTRY_SIZE;
+    }
+
+    inline void addTextReloc(size_t offset, uint32_t type, int64_t addend, bool internal) {
+        _textRelocs.push_back({offset, type, addend, internal});
     }
     
     inline size_t getAllocationSize() {
-        if(_tableAdjacent) {
-            return _code.size() + _table.size();
-        } else {
-            return _code.size();
-        }
+        return getCodeBodySize();
     }
     
     inline FunctionLocation* getCurrentLocation() {

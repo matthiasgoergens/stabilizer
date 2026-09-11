@@ -17,6 +17,9 @@ tests/*/*.opt.bc
 tests/HelloWorld/obj
 tests/HelloWorld/hello
 
+tests/CodeLayout/obj
+tests/CodeLayout/code-layout
+
 tests/libquantum/obj
 tests/libquantum/libquantum
 
