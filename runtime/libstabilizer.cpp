@@ -35,6 +35,10 @@ std::vector<ctor_t> constructors;
 bool rerandomizing = false;
 size_t interval = 500;
 
+// Set once stabilizer_main returns, so a SIGALRM still in flight during
+// process teardown is a no-op instead of relocating/trapping torn-down code.
+volatile sig_atomic_t shutting_down = 0;
+
 void** topFrame = NULL;
 
 /**
@@ -65,6 +69,18 @@ int main(int argc, char **argv) {
         ABORT("Code randomization (-Rcode) requires ELF text relocation fixups, which are currently only implemented on Linux x86_64. Disable -Rcode.");
     }
 #endif
+
+    // Resolve exact final-link function extents and text relocations before
+    // modifying any function entry.
+    if(!functions.empty()) {
+        if(!stabilizer_init_text_relocations(functions)) {
+          ABORT("Unable to initialize ELF function bounds and text relocations "
+                "required for code randomization. This requires Linux x86_64, "
+                "an unstripped symbol table, reading /proc/self/exe, and linking "
+                "with -Wl,--emit-relocs (szc adds this automatically for -Rcode). "
+                "Rebuild without -Rcode if you cannot provide them.");
+        }
+    }
 
     // If code randomization is enabled, we must ensure relocated code stays
     // within range of x86_64 pc-relative relocations (signed 32-bit).
@@ -111,17 +127,10 @@ int main(int argc, char **argv) {
         }
     }
 
-    // Pre-compute relocation fixups for randomized code.
-    // Code randomization requires ELF text relocations (link with --emit-relocs).
+    // All metadata is now validated.  Only now is it safe to replace entries.
     if(!functions.empty()) {
-        if(!stabilizer_init_text_relocations(functions)) {
-          ABORT("Unable to initialize ELF text relocations required for code "
-                "randomization. This requires Linux x86_64, reading "
-                "/proc/self/exe, and linking with -Wl,--emit-relocs (szc adds "
-                "this automatically for -Rcode). If unsupported relocation "
-                "types are encountered inside randomized functions, Stabilizer "
-                "will ABORT with a separate diagnostic. Rebuild without -Rcode "
-                "if you cannot provide relocations.");
+        for(Function* f : functions) {
+            f->installHeader();
         }
     }
 
@@ -144,14 +153,23 @@ int main(int argc, char **argv) {
 
     // Call the old main function
     int r = stabilizer_main(argc, argv);
+
+    // Disarm re-randomization before teardown. A SIGALRM delivered after
+    // stabilizer_main returns would run onTimer against state that is being
+    // torn down (the "Placing traps" path writes traps into function memory
+    // that may already be unmapped, faulting in onFault). Set the flag first
+    // so an alarm already in flight is a no-op, then stop the timer.
+    shutting_down = 1;
+    setTimer(0);
+
     DEBUG("Shutting down");
 
     return r;
 }
 
 extern "C" {
-    void stabilizer_register_function(void* codeBase, void* codeLimit, void* tableBase, size_t tableSize, bool adjacent, uint8_t* stackPad) {
-        Function* f = new Function(codeBase, codeLimit, tableBase, tableSize, adjacent, stackPad);
+    void stabilizer_register_function(void* codeBase, void* tableBase, uint32_t tableSize, uint8_t* stackPad) {
+        Function* f = new Function(codeBase, tableBase, tableSize, stackPad);
         functions.insert(f);
     }
 
@@ -234,6 +252,12 @@ void onTrap(int sig, siginfo_t* info, void* p) {
 }
 
 void onTimer(int sig, siginfo_t* info, void* p) {
+    // If the program is tearing down, do nothing: relocating or trapping
+    // functions here races with unmapping of their code.
+    if(shutting_down) {
+        return;
+    }
+
     Context c(p);
 
     DEBUG("Re-randomization timer fired at %p", c.ip());
@@ -251,7 +275,9 @@ void onTimer(int sig, siginfo_t* info, void* p) {
         DEBUG("Placing traps");
         for(std::set<Function*>::iterator iter = live_functions.begin(); iter != live_functions.end(); iter++) {
             Function* f = *iter;
-            if(c.ip() == f->getCodeBase()) {
+            uintptr_t ip = (uintptr_t)c.ip();
+            uintptr_t entry = (uintptr_t)f->getCodeBase();
+            if(ip >= entry && ip < entry + PATCHABLE_ENTRY_SIZE) {
                 DEBUG("Forwarding from trap at %p", c.ip());
                 c.ip() = f->getCurrentLocation()->getBase();
             }
@@ -282,6 +308,7 @@ void setTimer(int msec) {
 
 void setHandler(int sig, void(*fn)(int, siginfo_t*, void*)) {
     struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
     sa.sa_sigaction = (void(*)(int, siginfo_t*, void*))fn;
     sa.sa_flags = SA_SIGINFO;
     sigaction(sig, &sa, NULL);

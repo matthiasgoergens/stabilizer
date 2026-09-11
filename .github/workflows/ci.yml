@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install LLVM 21
+        run: |
+          curl --fail --silent --show-error \
+            --output /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 21
+          sudo apt-get install --yes llvm-21-dev
+          echo /usr/lib/llvm-21/bin >> "$GITHUB_PATH"
+
+      - name: Check out allocator dependencies
+        run: |
+          git clone https://github.com/emeryberger/Heap-Layers.git
+          git -C Heap-Layers checkout 9400e88e81cca2ef390f7a0c39d22180397a66e9
+          git clone https://github.com/emeryberger/DieHard.git
+          git -C DieHard checkout 4467f2b0bacf2e2a4d3a8eb7b89972a4d74ee290
+
+      - name: Build and run the regression suite
+        env:
+          CPLUS_INCLUDE_PATH: /usr/lib/llvm-21/include
+        run: make test
+
+      - name: Repeat the epoch-crossing regression
+        run: |
+          for run in {1..10}; do
+            echo "epoch-crossing run $run"
+            LD_LIBRARY_PATH="$PWD" tests/CodeLayout/code-layout
+          done
+
+      - name: Check the stripped-binary diagnostic
+        shell: bash
+        run: |
+          cp tests/CodeLayout/code-layout /tmp/code-layout-stripped
+          strip --strip-all /tmp/code-layout-stripped
+
+          set +e
+          LD_LIBRARY_PATH="$PWD" /tmp/code-layout-stripped \
+            > /tmp/stripped.out 2>&1
+          status=$?
+          set -e
+
+          cat /tmp/stripped.out
+          test "$status" -ne 0
+          grep --fixed-strings \
+            "Do not strip binaries used with -Rcode" /tmp/stripped.out
+
+      - name: Check the CET diagnostic
+        shell: bash
+        run: |
+          set +e
+          ./szc -Rcode -f cf-protection=branch \
+            tests/CodeLayout/code-layout.cpp -o /tmp/code-layout-cet \
+            > /tmp/cet.out 2>&1
+          status=$?
+          set -e
+
+          cat /tmp/cet.out
+          test "$status" -ne 0
+          grep --fixed-strings \
+            "does not support -fcf-protection=branch/full" /tmp/cet.out

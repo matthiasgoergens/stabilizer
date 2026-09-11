@@ -2,6 +2,7 @@
 #define RUNTIME_JUMP_H
 
 #include <new>
+#include <limits>
 #include <stdint.h>
 
 #include "Arch.h"
@@ -12,8 +13,15 @@ struct X86Jump32 {
     volatile uint32_t jmp_offset;
 
     X86Jump32(void *target) {
+        int64_t offset = (int64_t)(intptr_t)target
+            - ((int64_t)(intptr_t)this + (int64_t)sizeof(X86Jump32));
+        if(offset < std::numeric_limits<int32_t>::min() ||
+           offset > std::numeric_limits<int32_t>::max()) {
+            ABORT("x86 rel32 forwarding jump out of range: source=%p target=%p offset=%ld",
+                this, target, (long)offset);
+        }
         jmp_opcode = 0xE9;
-        jmp_offset = (uint32_t)((intptr_t)target - (intptr_t)this) - sizeof(struct X86Jump32);
+        jmp_offset = (uint32_t)(int32_t)offset;
     }
 
 } __attribute__((packed));
@@ -97,7 +105,10 @@ struct PPCJump {
 #if IS_X86
 typedef X86Jump32 Jump;
 #elif IS_X86_64
-typedef X86_64Jump Jump;
+// CodeWindow keeps relocated text within signed rel32 reach.  A single
+// instruction is also safe against timer delivery: execution cannot resume
+// midway through a multi-instruction stack-based absolute jump sequence.
+typedef X86Jump32 Jump;
 #elif IS_PPC
 typedef PPCJump Jump;
 #endif

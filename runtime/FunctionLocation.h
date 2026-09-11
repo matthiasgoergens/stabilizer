@@ -111,7 +111,7 @@ public:
         FunctionLocation* l = find(p);
         if(l != NULL) {
             size_t offset = l->_memory.offsetOf(p);
-            return l->_f->_code.offsetIn(offset);
+            return (uint8_t*)l->_f->getCodeBodyBase() + offset;
         } else {
             return p;
         }
