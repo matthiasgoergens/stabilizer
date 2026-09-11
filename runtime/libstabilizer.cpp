@@ -66,6 +66,18 @@ int main(int argc, char **argv) {
     }
 #endif
 
+    // Resolve exact final-link function extents and text relocations before
+    // modifying any function entry.
+    if(!functions.empty()) {
+        if(!stabilizer_init_text_relocations(functions)) {
+          ABORT("Unable to initialize ELF function bounds and text relocations "
+                "required for code randomization. This requires Linux x86_64, "
+                "an unstripped symbol table, reading /proc/self/exe, and linking "
+                "with -Wl,--emit-relocs (szc adds this automatically for -Rcode). "
+                "Rebuild without -Rcode if you cannot provide them.");
+        }
+    }
+
     // If code randomization is enabled, we must ensure relocated code stays
     // within range of x86_64 pc-relative relocations (signed 32-bit).
     if(!functions.empty()) {
@@ -111,17 +123,10 @@ int main(int argc, char **argv) {
         }
     }
 
-    // Pre-compute relocation fixups for randomized code.
-    // Code randomization requires ELF text relocations (link with --emit-relocs).
+    // All metadata is now validated.  Only now is it safe to replace entries.
     if(!functions.empty()) {
-        if(!stabilizer_init_text_relocations(functions)) {
-          ABORT("Unable to initialize ELF text relocations required for code "
-                "randomization. This requires Linux x86_64, reading "
-                "/proc/self/exe, and linking with -Wl,--emit-relocs (szc adds "
-                "this automatically for -Rcode). If unsupported relocation "
-                "types are encountered inside randomized functions, Stabilizer "
-                "will ABORT with a separate diagnostic. Rebuild without -Rcode "
-                "if you cannot provide relocations.");
+        for(Function* f : functions) {
+            f->installHeader();
         }
     }
 
@@ -150,8 +155,8 @@ int main(int argc, char **argv) {
 }
 
 extern "C" {
-    void stabilizer_register_function(void* codeBase, void* codeLimit, void* tableBase, size_t tableSize, bool adjacent, uint8_t* stackPad) {
-        Function* f = new Function(codeBase, codeLimit, tableBase, tableSize, adjacent, stackPad);
+    void stabilizer_register_function(void* codeBase, void* tableBase, uint32_t tableSize, uint8_t* stackPad) {
+        Function* f = new Function(codeBase, tableBase, tableSize, stackPad);
         functions.insert(f);
     }
 
@@ -251,7 +256,9 @@ void onTimer(int sig, siginfo_t* info, void* p) {
         DEBUG("Placing traps");
         for(std::set<Function*>::iterator iter = live_functions.begin(); iter != live_functions.end(); iter++) {
             Function* f = *iter;
-            if(c.ip() == f->getCodeBase()) {
+            uintptr_t ip = (uintptr_t)c.ip();
+            uintptr_t entry = (uintptr_t)f->getCodeBase();
+            if(ip >= entry && ip < entry + PATCHABLE_ENTRY_SIZE) {
                 DEBUG("Forwarding from trap at %p", c.ip());
                 c.ip() = f->getCurrentLocation()->getBase();
             }

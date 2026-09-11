@@ -10,6 +10,7 @@
 
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/ErrorHandling.h>
 
 #include <algorithm>
 #include <map>
@@ -136,6 +137,16 @@ struct StabilizerImpl {
      * \returns whether or not the module was modified (always true)
      */
     void operator()(Module &m) {
+        // LLVM places ENDBR64 before a patchable-function-entry NOP region.
+        // The runtime deliberately omits that region from relocated copies,
+        // so its body offset is only valid when CET branch protection is off.
+        // Refuse the unsupported combination instead of copying from the
+        // middle of the prefix or silently removing control-flow protection.
+        if(stabilize_code && m.getModuleFlag("cf-protection-branch") != NULL) {
+            report_fatal_error(
+                "Stabilizer -Rcode does not support -fcf-protection=branch/full");
+        }
+
         // Replace calls to heap functions with Stabilizer's random heap
         if(stabilize_heap) {
             randomizeHeap(m);
@@ -405,22 +416,13 @@ struct StabilizerImpl {
      * \returns The arguments to be passed to stabilizer_register_function
      */
     std::vector<Value*> randomizeCode(Module& m, Function& f) {
-        // Add a dummy function used to compute the size
-        Function* next = Function::Create(
-            FunctionType::get(Type::getVoidTy(m.getContext()), false),
-            GlobalValue::InternalLinkage,
-            "stabilizer.dummy."+f.getName()
-        );
+        static const char* PATCHABLE_ENTRY_SIZE = "32";
 
-        // Align the following function to a cache line to avoid mixing code/data in cache
-        next->setAlignment(Align(ALIGN));
-
-        // Put a basic block and return instruction into the dummy function
-        BasicBlock *dummy_block = BasicBlock::Create(m.getContext(), "", next);
-        ReturnInst::Create(m.getContext(), dummy_block);
-
-        // Ensure the dummy is placed immediately after our function
-        m.getFunctionList().insertAfter(f.getIterator(), next);
+        // The runtime replaces the first 32 bytes with its trap/forwarding
+        // header.  Make those bytes an explicit part of this function instead
+        // of assuming that naturally-small functions have spare neighbouring
+        // text which may safely be overwritten.
+        f.addFnAttr("patchable-function-entry", PATCHABLE_ENTRY_SIZE);
 
         // Remove stack protection (creates implicit global references)
         f.removeFnAttr(Attribute::StackProtect);
@@ -470,15 +472,6 @@ struct StabilizerImpl {
                 f.getName()+".relocation_table"
             );
 
-            // The referenced relocation table may not be the global one (for PC-relative data)
-            Constant* actualRelocationTable = relocationTable;
-
-            // Cast next-function pointer to the relocation table type for PC-relative data
-            if(isDataPCRelative(m)) {
-                Type* ptr = PointerType::get(relocationTableType, 0);
-                actualRelocationTable = ConstantExpr::getPointerCast(next, ptr);
-            }
-
             // Rewrite global references to use the relocation table
             size_t index = 0;
             for(Constant* c : referencedValues) {
@@ -499,7 +492,7 @@ struct StabilizerImpl {
 
                     Constant* slot = ConstantExpr::getGetElementPtr(
                         relocationTableType,
-                        actualRelocationTable,
+                        relocationTable,
                         indices,
                         true    // Yes, it is in bounds
                     );
@@ -522,17 +515,11 @@ struct StabilizerImpl {
             // The function base
             args.push_back(ConstantExpr::getPointerCast(&f, PointerType::get(m.getContext(), 0)));
 
-            // The function limit
-            args.push_back(ConstantExpr::getPointerCast(next, PointerType::get(m.getContext(), 0)));
-
             // The global relocation table
             args.push_back(ConstantExpr::getPointerCast(relocationTable, PointerType::get(m.getContext(), 0)));
 
             // The size of the relocation table
             args.push_back(ConstantExpr::getTrunc(ConstantExpr::getSizeOf(relocationTableType), Type::getInt32Ty(m.getContext())));
-
-            // If true, the function uses an adjacent relocation table, not the global
-            args.push_back(Constant::getIntegerValue(Type::getInt1Ty(m.getContext()), APInt(1, isDataPCRelative(m), false)));
 
             return args;
 
@@ -542,17 +529,11 @@ struct StabilizerImpl {
             // The function base
             args.push_back(ConstantExpr::getPointerCast(&f, PointerType::get(m.getContext(), 0)));
 
-            // The function limit
-            args.push_back(ConstantExpr::getPointerCast(next, PointerType::get(m.getContext(), 0)));
-
             // The global relocation table (null)
             args.push_back(Constant::getNullValue(PointerType::get(m.getContext(), 0)));
 
             // The size of the relocation table (0)
             args.push_back(Constant::getIntegerValue(Type::getInt32Ty(m.getContext()), APInt(32, 0, false)));
-
-            // PC-relative data?  Doesn't matter
-            args.push_back(Constant::getIntegerValue(Type::getInt1Ty(m.getContext()), APInt(1, 0, false)));
 
             return args;
         }
@@ -887,14 +868,12 @@ struct StabilizerImpl {
     void declareRuntimeFunctions(Module& m) {
         // Declare the register_function runtime function
         // void stabilizer_register_function(
-        //    void* codeBase, void* codeLimit, void* tableBase, size_t tableSize,
-        //    bool adjacent, uint8_t* stackPad)
+        //    void* codeBase, void* tableBase, size_t tableSize,
+        //    uint8_t* stackPad)
         std::vector<Type*> register_function_params;
         register_function_params.push_back(PointerType::get(m.getContext(), 0));
         register_function_params.push_back(PointerType::get(m.getContext(), 0));
-        register_function_params.push_back(PointerType::get(m.getContext(), 0));
         register_function_params.push_back(Type::getInt32Ty(m.getContext()));
-        register_function_params.push_back(Type::getInt1Ty(m.getContext()));
         register_function_params.push_back(PointerType::get(m.getContext(), 0));
 
         registerFunction = Function::Create(

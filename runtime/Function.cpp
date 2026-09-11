@@ -20,8 +20,9 @@ Function::~Function() {
 }
 
 /**
- * Copy the code and relocation table for this function.  Use the pre-assembled
- * code/table chunk if the function has already been relocated.
+ * Copy the code for this function.  Use the previous relocated copy if the
+ * function has already been relocated.  Relocation tables remain at their
+ * final-link addresses and pc-relative references are patched accordingly.
  * 
  * \arg target The destination of the copy.
  */
@@ -29,13 +30,11 @@ void Function::copyTo(void* target) {
     void* source = NULL;
 
     if(_current == NULL) {
-        source = _code.base();
+        source = getCodeBodyBase();
 
-        // Copy the code from the original function
-        memcpy(target, _code.base(), _code.size());
-
-        // Patch in the saved header, since the original has been overwritten
-        *(FunctionHeader*)target = _savedHeader;
+        // Copy the semantic body, omitting the NOP prefix reserved solely for
+        // the original entry's trap and forwarding jump.
+        memcpy(target, source, getCodeBodySize());
 
         // If there is a stack pad table, move it to a random location
         if(_stackPad != NULL && _table.base() != NULL && _table.size() >= sizeof(uintptr_t)) {
@@ -49,11 +48,6 @@ void Function::copyTo(void* target) {
             }
         }
 
-        // Copy the relocation table, if needed
-        if(_tableAdjacent) {
-            uint8_t* a = (uint8_t*)target;
-            memcpy(&a[_code.size()], _table.base(), _table.size());
-        }
     } else {
         source = _current->_memory.base();
         memcpy(target, source, getAllocationSize());
@@ -102,14 +96,9 @@ void Function::applyTextRelocs(void* source, void* dest) {
     uint8_t* src = (uint8_t*)source;
     uint8_t* dst = (uint8_t*)dest;
 
-    // Anything within the copied allocation should move with the function,
-    // and therefore should NOT be re-targeted back to the original address.
-    uintptr_t internal_begin = (uintptr_t)src;
-    uintptr_t internal_end = (uintptr_t)src + _code.size() + (_tableAdjacent ? _table.size() : 0);
-
     for(const TextReloc& r : _textRelocs) {
         // All relocation types we currently record are 32-bit fields.
-        if(r.offset + sizeof(int32_t) > _code.size()) {
+        if(r.offset + sizeof(int32_t) > getCodeBodySize()) {
             continue;
         }
 
@@ -123,26 +112,11 @@ void Function::applyTextRelocs(void* source, void* dest) {
             case R_X86_64_PC32:
             case R_X86_64_PLT32:
             {
-                // Relocation semantics for a pc-relative field: stored value is
-                // S + A - P, so S + A = oldVal + oldP is the ELF relocation value
-                // (the resolved reference address, modulo the x86 RIP +4/+trailing
-                // adjustment). Test THIS against the copied range, NOT the bare
-                // symbol value S = oldVal + oldP - addend. References to the
-                // function's own adjacent relocation table are emitted against the
-                // .text SECTION symbol plus a large addend, so S is the section
-                // base (outside the function) while S + A is the table (inside).
-                // Keying the internal/external decision on S misclassifies these
-                // internal table references as external and rewrites them,
-                // corrupting the relocated copy. (Caveat: S + A is ~4 bytes short
-                // of the true x86 effective address; a reference to the very first
-                // or last few bytes of the copied region could still be
-                // misclassified. Not exercised by the known reproducers.)
-                intptr_t target = (intptr_t)oldVal + (intptr_t)oldP;
-
-                // If the target is within our copied allocation, leave it alone
-                // so it continues to resolve into the relocated copy (including
-                // the adjacent relocation table).
-                if((uintptr_t)target >= internal_begin && (uintptr_t)target < internal_end) {
+                // The ELF parser classifies whether the referenced value moves
+                // with this function.  Do not reconstruct that decision from
+                // P+disp here: RIP is the end of the whole instruction, which
+                // need not be the end of this four-byte field.
+                if(r.internal) {
                     break;
                 }
 
