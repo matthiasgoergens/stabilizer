@@ -37,6 +37,20 @@ jobs:
           CPLUS_INCLUDE_PATH: /usr/lib/llvm-21/include
         run: make test
 
+      - name: Verify recursive failure propagation
+        run: sh tests/Harness/check-recursion.sh
+
+      - name: Verify test instrumentation
+        run: |
+          sh tests/Harness/check-instrumentation.sh \
+            tests/HelloWorld/hello tests/CodeLayout/code-layout \
+            tests/libquantum/libquantum tests/bzip2/bzip2
+          clang++ tests/CodeLayout/code-layout.cpp -o /tmp/code-layout-native
+          if sh tests/Harness/check-instrumentation.sh /tmp/code-layout-native; then
+            echo "ERROR: instrumentation check accepted a native binary"
+            exit 1
+          fi
+
       - name: Repeat the epoch-crossing regression
         run: |
           for run in {1..10}; do
