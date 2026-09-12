@@ -106,7 +106,7 @@ $(OTHER_TARGETS):: $(OBJS) $(INCLUDE_DIRS) $(INCLUDES) Makefile $(ROOT)/common.m
 $(RECURSIVE_TARGETS)::
 	@for dir in $(DIRS); do \
 	  echo "$(INDENT)[$@] Entering $$dir"; \
-	  $(MAKE) -C $$dir $@ DEBUG=$(DEBUG); \
+	  $(MAKE) -C $$dir $@ DEBUG=$(DEBUG) || exit $$?; \
 	done
 
 $(ROOT)/Heap-Layers:
