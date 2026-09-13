@@ -6,3 +6,11 @@
 /*.out
 /pic-tls
 /pic-ie
+/shared-gd
+/shared-ie
+/shared-native
+/libshared-tls.so
+/legacy-gd
+/legacy-ie
+/legacy-*.bc
+/legacy-*.o

@@ -166,6 +166,8 @@ struct StabilizerImpl {
             }
         }
 
+        if(stabilize_code) outlineTLSAddresses(m, local_functions);
+
         declareRuntimeFunctions(m);
 
         std::map<Function*, GlobalVariable*> stackPads;
@@ -243,6 +245,42 @@ struct StabilizerImpl {
         Function *main = m.getFunction("main");
         if(main != NULL) {
             main->setName("stabilizer_main");
+        }
+    }
+
+    // Resolve TLS in fixed code. Linker TLS relaxation may rewrite both the
+    // address sequence and its call while preserving the old relocation labels.
+    // Helpers created after local_functions was captured are never registered
+    // or copied, so their native TLS lowering remains intact.
+    void outlineTLSAddresses(Module& m, const std::set<Function*>& functions) {
+        std::map<GlobalVariable*, Function*> accessors;
+        std::vector<CallInst*> calls;
+        for(Function* f : functions) {
+            for(BasicBlock& block : *f) {
+                for(Instruction& instruction : block) {
+                    auto* call = dyn_cast<CallInst>(&instruction);
+                    if(call && call->getCalledFunction() &&
+                       call->getCalledFunction()->getIntrinsicID() == Intrinsic::threadlocal_address)
+                        calls.push_back(call);
+                }
+            }
+        }
+        for(CallInst* call : calls) {
+            auto* global = dyn_cast<GlobalVariable>(call->getArgOperand(0));
+            if(!global || !global->isThreadLocal())
+                report_fatal_error("Stabilizer TLS address requires a thread-local GlobalVariable");
+            Function*& accessor = accessors[global];
+            if(!accessor) {
+                accessor = Function::Create(FunctionType::get(call->getType(), false),
+                    Function::InternalLinkage, "stabilizer.tls." + global->getName(), &m);
+                accessor->addFnAttr(Attribute::NoInline);
+                BasicBlock* body = BasicBlock::Create(m.getContext(), "", accessor);
+                Value* address = CallInst::Create(call->getCalledFunction(), {global}, "", body);
+                ReturnInst::Create(m.getContext(), address, body);
+            }
+            Value* address = CallInst::Create(accessor, {}, "tls.address", call);
+            call->replaceAllUsesWith(address);
+            call->eraseFromParent();
         }
     }
 

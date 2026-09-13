@@ -6,7 +6,8 @@
 declare ptr @llvm.threadlocal.address.p0(ptr)
 
 ; CHECK-LABEL: define ptr @address()
-; CHECK: call ptr @llvm.threadlocal.address.p0(ptr @local)
+; CHECK: load ptr, ptr @address.relocation_table
+; CHECK: call ptr %
 ; CHECK-NEXT: ret ptr
 define ptr @address() {
   %p = call ptr @llvm.threadlocal.address.p0(ptr @local)
@@ -33,3 +34,10 @@ define ptr @element() {
 define ptr @control() {
   ret ptr @ordinary
 }
+
+; Helpers are appended after the original function snapshot and stay native.
+; CHECK-LABEL: define internal ptr @stabilizer.tls.local()
+; CHECK-SAME: #[[TLS:[0-9]+]]
+; CHECK: call ptr @llvm.threadlocal.address.p0(ptr @local)
+; CHECK-NEXT: ret ptr
+; CHECK: attributes #[[TLS]] = { noinline }

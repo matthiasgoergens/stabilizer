@@ -170,8 +170,13 @@ not start concurrent calls into instrumented executable text before runtime
 initialisation. Instrumented registration after startup is rejected, as is
 ordinary `fork()` in retained mode. Local-exec TLS offsets (`R_X86_64_TPOFF32`)
 are preserved across code relocation and tested with distinct thread values
-and stable per-thread addresses. Other TLS relocation forms are not supported;
-TLSGD/TLSLD/GOTTPOFF/TLSDESC address relocations are rejected because retained
+and stable per-thread addresses. The LLVM TLS-address intrinsic is outlined
+into small fixed, non-inlined helpers; these are not randomised. Canonical
+Clang TLS therefore uses native compiler/linker lowering, including tested
+PIC global-dynamic and initial-exec access to TLS in a native shared library.
+This adds a helper call and excludes the resolver itself from layout sampling;
+its measurement cost has not been established. Direct TLS IR forms that still
+emit TLSGD/TLSLD/GOTTPOFF/TLSDESC in copied bodies are rejected because retained
 linker relocation labels may describe instructions that were already relaxed.
 Do not infer support from a TLS type merely being PC-relative before linking.
 Raw clone/fork system calls, instrumented
