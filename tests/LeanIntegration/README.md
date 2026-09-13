@@ -107,3 +107,29 @@ CI runs both the unit tests and repeated-process matrix as a mandatory step
 and preserves its observations separately. Selected source/toolchain hashes
 are checked before and after building/running; built artefacts are checked
 across execution. This is not a complete manifest of system/imported files.
+
+The repeated observer also brackets each original wall-clock call with
+`CLOCK_THREAD_CPUTIME_ID` reads. Each invocation's JSON record contains
+`thread_cpu_before` and `thread_cpu_after`, each a two-element array of
+nanoseconds (start and stop). These are absolute readings for that callback
+thread, not process-wide CPU time. Reset/read occur only outside the joined
+callback; concurrent or nested callbacks are not supported by this observer.
+
+Subject to clock resolution and accounting error, CPU consumed between the
+wall-clock samples lies between `before[1] - after[0]` and
+`after[1] - before[0]`. Clock-call ordering and unsigned 64-bit representation
+are checked; equal samples are permitted. CPU-clock failures or invalid
+timestamps terminate the probe, rather than emitting a successful sample.
+No CPU-versus-wall threshold is a correctness gate. In particular, a tiny
+interval can appear inconsistent because of the two clocks' resolution.
+
+Subtracting those bounds from wall elapsed time can inform a future
+thread off-CPU investigation, but does not identify scheduler, blocking,
+GC or layout causes. Preserve raw differences, including negative values;
+do not silently clamp or discard them. Other threads' CPU is not measured.
+The four added CPU-clock reads per invocation perturb the observation; this
+is not an unbiased cost estimate and is not interchangeable with timings
+from older observers. CI checks the observation mechanism and behavioural
+parity, not performance or precision. `test_observer.py` additionally uses
+deterministic clock stubs to test ordering, reset and error handling without
+timing thresholds.

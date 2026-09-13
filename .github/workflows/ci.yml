@@ -152,6 +152,10 @@ jobs:
       - name: Check repeated Adler kernel execution across epochs
         run: |
           uv run --no-project python -B tests/LeanIntegration/test_repeated.py
+          uv run --no-project python -B tests/LeanIntegration/test_observer.py \
+            --lean-root "$RUNNER_TEMP/lean-4.33.1-linux" \
+            --clang /usr/lib/llvm-21/bin/clang \
+            --output tests/LeanIntegration/build/observer-ci
           uv run --no-project --with setuptools==84.0.0 python -B \
             tests/LeanIntegration/repeated.py \
             --lean-root "$RUNNER_TEMP/lean-4.33.1-linux" \
@@ -167,3 +171,4 @@ jobs:
             tests/LeanIntegration/build/repeated-ci/*.json
             tests/LeanIntegration/build/repeated-ci/*.jsonl
             tests/LeanIntegration/build/repeated-ci/*.c
+            tests/LeanIntegration/build/observer-ci/*.jsonl

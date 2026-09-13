@@ -15,6 +15,8 @@ def observation(mode='sampled', constant_kernel=False):
         pc = 1 if constant_kernel else 0x2000 + 0x1000 * generation + 0x100 * kernel
         records.append({'invocation': i, 'label': label, 'exhausted': 0,
                         'epoch': 0 if mode == 'native' else 1 + generation,
+                        'thread_cpu_before': [100, 200],
+                        'thread_cpu_after': [110, 210],
                         'clocks': [hex(0x1000 + generation * 0x100 + offset) for offset in (0, 8)],
                         'kernel_pcs': [hex(pc)] * 4})
     return {'returncode': 0, 'stdout': '0 10 20 30 40\n' * len(ORDER),
@@ -22,6 +24,39 @@ def observation(mode='sampled', constant_kernel=False):
 
 
 class RepeatedGate(unittest.TestCase):
+    def test_cpu_brackets_are_required_and_ordered(self):
+        for fault in ('missing', 'short', 'negative', 'boolean', 'float',
+                      'string', 'overflow', 'reversed-start', 'overlap', 'reversed-stop'):
+            with self.subTest(fault=fault):
+                row = observation()
+                records = [json.loads(line) for line in row['stderr'].splitlines()]
+                record = records[0]
+                if fault == 'missing':
+                    del record['thread_cpu_before']
+                elif fault == 'short':
+                    record['thread_cpu_before'] = [100]
+                elif fault in ('negative', 'boolean', 'float', 'string', 'overflow'):
+                    record['thread_cpu_before'][0] = {
+                        'negative': -1, 'boolean': True, 'float': 1.5,
+                        'string': '100', 'overflow': 2**64}[fault]
+                elif fault == 'reversed-start':
+                    record['thread_cpu_after'][0] = 99
+                elif fault == 'overlap':
+                    record['thread_cpu_after'][0] = 201
+                elif fault == 'reversed-stop':
+                    record['thread_cpu_after'][1] = 199
+                row['stderr'] = '\n'.join(map(json.dumps, records))
+                self.assertFalse(valid(row, EXPECTED, 3, 'sampled'))
+
+    def test_equal_cpu_samples_are_valid(self):
+        # Clock resolution may hide very short intervals; no cpu <= wall gate.
+        row = observation()
+        records = [json.loads(line) for line in row['stderr'].splitlines()]
+        for record in records:
+            record['thread_cpu_before'] = record['thread_cpu_after'] = [0, 0]
+        row['stderr'] = '\n'.join(map(json.dumps, records))
+        self.assertTrue(valid(row, EXPECTED, 3, 'sampled'))
+
     def test_positive_modes(self):
         for mode in ('native', 'fixed', 'sampled'):
             with self.subTest(mode=mode):

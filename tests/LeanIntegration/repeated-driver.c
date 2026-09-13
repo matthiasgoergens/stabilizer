@@ -17,6 +17,7 @@ extern void adler_observer_reset(void);
 extern unsigned adler_clock_count(void), adler_kernel_count(void);
 extern void *adler_clock_pc(unsigned), *adler_kernel_pc(unsigned);
 extern unsigned adler_kernel_tag(unsigned);
+extern uint64_t adler_thread_cpu_before(unsigned), adler_thread_cpu_after(unsigned);
 
 static pthread_t initial_thread;
 static lean_object *(*application)(int, char **);
@@ -115,7 +116,16 @@ static lean_object *repeated_run_main(lean_object *(*fn)(int, char **),
             require(adler_kernel_tag(j) == tag && adler_kernel_pc(j), "kernel tag/PC mismatch");
             fprintf(stderr, "%s\"%p\"", j ? "," : "", adler_kernel_pc(j));
         }
-        fprintf(stderr, "]}\n");
+        require(adler_thread_cpu_before(0) <= adler_thread_cpu_after(0) &&
+                adler_thread_cpu_after(0) <= adler_thread_cpu_before(1) &&
+                adler_thread_cpu_before(1) <= adler_thread_cpu_after(1),
+                "thread CPU clocks out of order");
+        fprintf(stderr, "],\"thread_cpu_before\":[%llu,%llu],"
+                "\"thread_cpu_after\":[%llu,%llu]}\n",
+                (unsigned long long)adler_thread_cpu_before(0),
+                (unsigned long long)adler_thread_cpu_before(1),
+                (unsigned long long)adler_thread_cpu_after(0),
+                (unsigned long long)adler_thread_cpu_after(1));
         if (i + 1 == n) return result;
         lean_dec_ref(result);
     }

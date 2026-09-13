@@ -40,6 +40,12 @@ def valid(row, expected, reps, mode, order=ORDER, constant_kernel_control=False)
     within = {}
     for i, (record, label) in enumerate(zip(records, order, strict=True)):
         block = i // 4
+        before, after = record.get('thread_cpu_before'), record.get('thread_cpu_after')
+        if (not isinstance(before, list) or not isinstance(after, list)
+                or len(before) != 2 or len(after) != 2
+                or any(type(x) is not int or not 0 <= x < 2**64 for x in before + after)
+                or not before[0] <= after[0] <= before[1] <= after[1]):
+            return False
         if i % 4 == 0:
             previous, within = within, {}
         if (record['invocation'] != i or record['label'] != label or record['exhausted']
