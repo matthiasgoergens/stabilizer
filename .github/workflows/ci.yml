@@ -43,6 +43,7 @@ jobs:
       - name: Verify test instrumentation
         run: |
           sh tests/Harness/check-instrumentation.sh \
+            tests/CodeSource/build/admission \
             tests/ThreadLocal/thread-local \
             tests/ThreadLocal/shared-gd tests/ThreadLocal/shared-ie \
             tests/RetainedCode/retained-code \

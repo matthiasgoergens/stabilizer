@@ -12,3 +12,14 @@ particular sanitizer diagnostic from the old dependencies.
 This is code-source coverage, not an all-allocator OOM guarantee. The data
 heap and shuffle-reservoir failure handling are separate concerns. Normal
 legacy and retained execution remain covered by the other runtime tests.
+
+The reservoir unit uses a bounded fake heap and scripted random draws. It
+checks slot choices, exchanges on allocation/free, retained ownership after
+partial fill failure, retry, admission budgets, unsupported-class rejection
+and rejection sampling for non-power-of-two slot counts. `-DLEGACY_RESERVOIR`
+is a diagnostic negative control for the old large-allocation bypass.
+
+An instrumented admission fixture checks default and explicit budgets, too
+little space and malformed values in both legacy and retained modes. These
+checks run in CI. Address-diversity and performance experiments are separate;
+there is no probabilistic diversity threshold in the correctness tests.

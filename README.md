@@ -125,6 +125,28 @@ The `-norm` flag tests the results for normality using the Shapiro-Wilk test.
 The `-all` flag dumps all results to console, suitable for pasting into a
 spreadsheet or CSV file.
 
+## Code placement reservoirs
+
+Code placement uses a separate reservoir for every active rounded allocation
+size class, including functions larger than 256 bytes. Allocation exchanges
+a new object with a randomly selected held object; legacy freeing exchanges
+the freed object with a held object before releasing the latter. This
+restores the per-class mechanism instead of treating the historical 256-object
+buffer count as a 256-byte cutoff. The data heap is unchanged.
+
+`STABILIZER_MAX_SHUFFLE_BYTES` controls the total held rounded payload bytes
+in both legacy and retained modes. Its default is 16777216 (16 MiB), with a
+range of 1–1073741824. Startup admits at least two slots for each active code
+class, then shares remaining space up to 256 slots per class. Insufficient
+budgets and unsupported sizes are rejected before function headers are
+installed; there is no unshuffled large-code fallback. Slots are filled lazily.
+
+This is separate from the retained logical copied-body budget. It excludes
+allocation headers, chunk slack, mappings, metadata and live code copies, so
+it is **not an RSS limit**. Reservoirs have process lifetime. Their successive
+choices are not independent layout samples merely because they use an RNG;
+workload exposure, layout diversity and timing assumptions need measurement.
+
 ## Experimental retained code generations (Linux x86_64)
 
 Code randomisation sets `frame-pointer=all` on instrumented definitions,

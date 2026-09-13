@@ -131,6 +131,7 @@ int main(int argc, char **argv) {
         }
     }
 
+    if(!functions.empty()) configureCodeHeap();
     if(retained) retained_validate_layout();
 
     // All metadata is now validated.  Only now is it safe to replace entries.
