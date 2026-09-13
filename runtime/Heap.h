@@ -6,6 +6,7 @@
 
 #include "Util.h"
 #include "MMapSource.h"
+#include "CheckedCodeSource.h"
 
 enum {
     DataShuffle = 256,
@@ -20,7 +21,7 @@ enum {
 };
 
 class DataSource : public SizeHeap<FreelistHeap<BumpAlloc<DataSize, MMapSource<DataProt, DataFlags>, 16> > > {};
-class CodeSource : public SizeHeap<FreelistHeap<BumpAlloc<CodeSize, MMapSource<CodeProt, CodeFlags>, CODE_ALIGN> > > {};
+class CodeSource : public CheckedCodeSize<FreelistHeap<CheckedCodeBump<CodeSize, MMapSource<CodeProt, CodeFlags>, CODE_ALIGN> > > {};
     
 // Restore DieHard's shuffling layer for heap/code placement randomization.
 // Modern `ShuffleHeap` takes (ChunkSize, MaxSize, SuperHeap). We use a shuffled
