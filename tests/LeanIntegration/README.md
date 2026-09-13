@@ -72,3 +72,38 @@ are ignored: this does not establish overhead, useful measurement accuracy,
 unbounded sampling, general TLS/unwind support or instrumented Lean-runtime
 compatibility. Compiler and runtime versions must not be mixed when updating
 the pin; update the digest and embedded-commit check together.
+
+## Repeated kernel-entry exposure
+
+`repeated.py` supplements the two-invocation tests with eight invocations in
+each fresh process, grouped into two blocks. Each block contains two calls
+to the same boxed helper, one direct fold and one indexed reference. Native
+and retained-fixed modes keep one layout; retained-sampled mode requests one
+epoch between the blocks. Automatic epochs are disabled. Both callback
+thread modes and four size/repetition pairs are exercised: (0, 0),
+(1024, 3), (262144, 8) and (1048576, 2). This gives 24 positive processes
+and 192 positive invocations, with checksums checked using the shared Adler
+oracle. Printed times are not analysed.
+
+```sh
+uv run --no-project --with setuptools==84.0.0 python -B tests/LeanIntegration/repeated.py --lean-root /path/to/lean-4.33.1-linux --output tests/LeanIntegration/build/repeated
+```
+
+The runner accepts the same optional `--llvm-bin` directory. It retains the
+original generated C and injects one native observer call at each generated
+helper/direct/reference definition, failing if a definition is missing or
+ambiguous. Corresponding clock and kernel probe PCs must change across
+sampled blocks and remain fixed in controls. Clang may inline probe sites;
+this establishes execution at the injected sites, not separate out-of-line
+functions or movement of an active inner loop. Probes can affect optimisation
+and timings, so this is not an overhead measurement.
+
+Three negative controls check malformed block order, startup exhaustion at
+one epoch, and a constant-kernel-PC observer. The last must pass checksums,
+clock movement and epoch progression while failing kernel movement. A generic
+failure is not accepted in its place. `test_repeated.py` supplies self-contained
+positive and mutation tests of these output gates, without saved local logs.
+CI runs both the unit tests and repeated-process matrix as a mandatory step
+and preserves its observations separately. Selected source/toolchain hashes
+are checked before and after building/running; built artefacts are checked
+across execution. This is not a complete manifest of system/imported files.

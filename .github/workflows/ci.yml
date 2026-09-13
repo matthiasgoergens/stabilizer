@@ -148,3 +148,22 @@ jobs:
             tests/LeanIntegration/build/adler-ci/*.json
             tests/LeanIntegration/build/adler-ci/*.jsonl
             tests/LeanIntegration/build/adler-ci/Variants.c
+
+      - name: Check repeated Adler kernel execution across epochs
+        run: |
+          uv run --no-project python -B tests/LeanIntegration/test_repeated.py
+          uv run --no-project --with setuptools==84.0.0 python -B \
+            tests/LeanIntegration/repeated.py \
+            --lean-root "$RUNNER_TEMP/lean-4.33.1-linux" \
+            --output tests/LeanIntegration/build/repeated-ci
+
+      - name: Preserve repeated Adler observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: repeated-adler-observations
+          if-no-files-found: ignore
+          path: |
+            tests/LeanIntegration/build/repeated-ci/*.json
+            tests/LeanIntegration/build/repeated-ci/*.jsonl
+            tests/LeanIntegration/build/repeated-ci/*.c
