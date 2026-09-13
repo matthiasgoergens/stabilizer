@@ -127,6 +127,12 @@ spreadsheet or CSV file.
 
 ## Experimental retained code generations (Linux x86_64)
 
+Code randomisation sets `frame-pointer=all` on instrumented definitions,
+including imported bitcode with conflicting frame-pointer attributes. Naked
+functions are rejected under `-Rcode` because they lack a normal prologue.
+This does not add frame pointers to native libraries or make arbitrary native
+stacks unwindable.
+
 The default runtime still assumes a single application stack when reclaiming
 relocated code. It is not safe for general pthread workloads. The opt-in
 `STABILIZER_CODE_MODE=retained` mode instead prepares all initial code copies

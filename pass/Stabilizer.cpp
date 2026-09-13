@@ -463,6 +463,15 @@ struct StabilizerImpl {
     std::vector<Value*> randomizeCode(Module& m, Function& f) {
         static const char* PATCHABLE_ENTRY_SIZE = "32";
 
+        if(f.hasFnAttribute(Attribute::Naked)) {
+            report_fatal_error("Stabilizer -Rcode does not support naked functions");
+        }
+        // Legacy re-randomisation walks frames. The llc command-line setting
+        // only supplies a default and cannot override an incoming function's
+        // explicit none/non-leaf attribute. Make this requirement explicit on
+        // every code-randomised definition, including imported bitcode.
+        f.addFnAttr("frame-pointer", "all");
+
         // The runtime replaces the first 32 bytes with its trap/forwarding
         // header.  Make those bytes an explicit part of this function instead
         // of assuming that naturally-small functions have spare neighbouring
