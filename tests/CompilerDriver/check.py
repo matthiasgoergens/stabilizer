@@ -1,6 +1,7 @@
 """Check real C/C++ frontend IR and code-randomised execution, not timings."""
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -14,10 +15,10 @@ env.update(LD_LIBRARY_PATH=str(ROOT), STABILIZER_CODE_MODE='retained',
            STABILIZER_INTERVAL_MS='0')
 
 
-def run(command):
+def run(command, expected_status=0):
     result = subprocess.run(['timeout', '--kill-after=1s', '30s', *map(str, command)],
                             env=env, capture_output=True, text=True, check=False)
-    if result.returncode:
+    if result.returncode != expected_status:
         raise RuntimeError(f'{command}\n{result.stdout}\n{result.stderr}')
     return result.stdout
 
@@ -34,6 +35,9 @@ def attributes(ir, function):
 
 
 llvm = Path(run(['llvm-config', '--bindir']).strip())
+for invalid in ('-1', '4'):
+    run([ROOT / 'szc', '-O', invalid, '-c', HERE / 'fixture.c',
+         '-o', OUT / 'invalid.o'], expected_status=2)
 for suffix in ('c', 'cpp'):
     helper = 'tiny' if suffix == 'c' else '_ZL4tinyi'
     source = OUT / f'fixture.{suffix}'
@@ -52,7 +56,13 @@ for suffix in ('c', 'cpp'):
                 raise RuntimeError('wrong -O0 attributes for required lowering passes')
         if 'noinline' not in attributes(ir, 'user_noinline'):
             raise RuntimeError('intentional noinline was lost')
-        run([ROOT / 'szc', f'-O{level}', '-Rcode', '-v', raw, '-o', name])
+        output = run([ROOT / 'szc', f'-O{level}', '-Rcode', '-v', raw, '-o', name])
+        commands = [shlex.split(line) for line in output.splitlines()]
+        backend = [cmd for cmd in commands if cmd and Path(cmd[0]).name == 'llc']
+        if len(backend) != 1 or f'-O{level}' not in backend[0]:
+            raise RuntimeError(f'{suffix} -O{level}: backend optimisation level was not honoured')
+        if not {'-relocation-model=pic', '--frame-pointer=all'} <= set(backend[0]):
+            raise RuntimeError('backend lost relocation/frame-pointer requirements')
         transformed = run([llvm / 'llvm-dis', str(name) + '.opt.bc', '-o', '-'])
         if level and re.search(r'^define .*@' + helper + r'\(', transformed, re.MULTILINE):
             raise RuntimeError('ordinary inline helper survived optimisation')

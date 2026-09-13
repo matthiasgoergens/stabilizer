@@ -28,7 +28,7 @@ parser.add_argument('-o')
 # For code randomization, we also preserve text relocations in the final binary
 # so the Stabilizer runtime can fix up remaining pc-relative references (e.g.,
 # constant pools) after moving code.
-parser.add_argument('-O', type=int, default=2)
+parser.add_argument('-O', type=int, choices=range(4), default=2)
 parser.add_argument('-g', action='store_true')
 parser.add_argument('-f', action='append', default=[])
 parser.add_argument('-D', action='append', default=[])
@@ -212,8 +212,9 @@ def transform(input):
 	return args.o + '.opt.bc'
 
 def codegen(input):
-	# cmd = 'llc -O0 -relocation-model=pic -disable-fp-elim'
-	cmd = [LLC, '-O0', '-relocation-model=pic', '--frame-pointer=all']
+	# Honour the requested optimisation level throughout the pipeline while
+	# retaining the code-relocation and legacy stack-walk requirements.
+	cmd = [LLC, '-O' + str(args.O), '-relocation-model=pic', '--frame-pointer=all']
 	# Emit a native object file and link it directly. Flang's driver currently
 	# does not accept assembly (`.s`) inputs (it can error with "unknown
 	# integrated tool '-cc1as'"), so avoid producing/linking `.s` here.
