@@ -29,6 +29,10 @@ tests/EntryPublication/alignment-unaligned
 tests/EntryPublication/alignment-unaligned.out
 tests/EntryPublication/dependency-check.out
 
+tests/RelocationTypes/obj
+tests/RelocationTypes/relocation-types
+tests/RelocationTypes/types.out.ll
+
 tests/libquantum/obj
 tests/libquantum/libquantum
 

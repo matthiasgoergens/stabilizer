@@ -503,7 +503,9 @@ struct StabilizerImpl {
                     );
 
                     Value* loaded = new LoadInst(
-                        slot->getType(),
+                        // The slot address is an opaque pointer, not the type
+                        // of its stored value (which may be an integer cast).
+                        c->getType(),
                         slot,
                         c->getName()+".indirect",
                         insertion_point
