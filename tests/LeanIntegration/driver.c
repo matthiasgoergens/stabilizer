@@ -9,6 +9,9 @@
 extern uint64_t stabilizer_completed_epochs(void) __attribute__((weak));
 extern int stabilizer_request_epoch(void) __attribute__((weak));
 extern void *stabilizer_code_location(void *) __attribute__((weak));
+extern lean_object *lean_integration_clock(void);
+extern unsigned lean_integration_clock_calls(void);
+extern void *lean_integration_pc(unsigned);
 
 static pthread_t initial_thread;
 static lean_object *(*application)(int, char **);
@@ -65,6 +68,18 @@ static lean_object *integration_run_main(lean_object *(*fn)(int, char **),
     }
     result = lean_run_main(checked_callback, argc, argv);
     require(calls == 2, "expected two real Lean callbacks");
+    require(lean_integration_clock_calls() == 4, "expected four application clock calls");
+    void *pc[4];
+    for (unsigned i = 0; i < 4; ++i) {
+        pc[i] = lean_integration_pc(i);
+        require(pc[i] != NULL, "missing application code PC");
+    }
+    fprintf(stderr, "Lean integration: code PCs %p %p %p %p\n", pc[0], pc[1], pc[2], pc[3]);
+    if (stabilizer_completed_epochs) {
+        require(pc[0] != pc[2] && pc[1] != pc[3], "application code PCs did not change");
+    } else {
+        require(pc[0] == pc[2] && pc[1] == pc[3], "native application code PCs changed");
+    }
     fprintf(stderr, "Lean integration: two callbacks checked\n");
     return result;
 }
@@ -73,5 +88,7 @@ static lean_object *integration_run_main(lean_object *(*fn)(int, char **),
  * wrap its call to lean_run_main; lean.h above prevents macro substitution
  * from altering the real runtime declaration. */
 #define lean_run_main integration_run_main
+#define lean_io_mono_nanos_now lean_integration_clock
 #include "Variants.c"
+#undef lean_io_mono_nanos_now
 #undef lean_run_main

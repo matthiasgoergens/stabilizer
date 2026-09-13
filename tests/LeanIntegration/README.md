@@ -23,6 +23,12 @@ The driver preserves Lean's generated initialisation and finalisation. It
 wraps the real `lean_run_main` call, checks `pthread_self()` inside each
 callback, and calls the application twice. Instrumented cases require a
 completed relocation epoch and a changed callback destination between calls.
+The generated application's two clock calls per invocation go through a
+separately compiled native observer DSO. It records its caller return PCs,
+which must change between instrumented invocations and remain unchanged in
+native controls. This checks execution in different application code copies,
+not just publication of new entry targets. It does not show that a live inner
+loop moves while executing, or that layout samples are independent.
 Both `LEAN_MAIN_USE_THREAD=0` and `1` are exercised; `LEAN_NUM_THREADS=1`
 alone does not suppress the main worker thread.
 
@@ -30,12 +36,17 @@ Ten variants × native/instrumented × initial/worker thread give 40 fresh
 processes. Two further processes check automatic epochs. All runs check two
 checksum pairs against an independent integer reference implementation.
 A one-generation negative control must reject an epoch request rather than
-mistaking retained startup for continuing sampling. Each process has an
+mistaking retained startup for continuing sampling. A second negative control
+substitutes an observer that always reports the same PC: it must fail even
+after the epoch and destination checks succeed. Thus there are 42 positive
+processes and two negative controls. Each process has an
 external timeout; epoch waiting also has an internal monotonic deadline.
 
 This is a separate CI step, not part of dependency-light `make test`, because
 the pinned Lean release archive is approximately 570 MB. CI does not skip it.
-The ordinary C pthread regressions remain in `make test`. Printed timings
+The ordinary C pthread regressions remain in `make test`. Observer calls
+perturb the workload, so do not compare these timings with unwrapped probes.
+Printed timings
 are ignored: this does not establish overhead, useful measurement accuracy,
 unbounded sampling, general TLS/unwind support or instrumented Lean-runtime
 compatibility. Compiler and runtime versions must not be mixed when updating
