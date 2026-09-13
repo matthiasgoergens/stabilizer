@@ -213,7 +213,7 @@ void onTrap(int sig, siginfo_t* info, void* p) {
     c.ip() = (void*)((uintptr_t)c.ip() - Trap::TrapAdjust);
 
     // Extract the trapped function (stored next to the trap instruction)
-    FunctionHeader* h = (FunctionHeader*)c.ip();
+    FunctionHeader* h = FunctionHeader::fromTrapAddress(c.ip());
     Function* f = h->getFunction();
 
     // If the trap was placed to trigger a re-randomization
@@ -275,12 +275,16 @@ void onTimer(int sig, siginfo_t* info, void* p) {
         DEBUG("Placing traps");
         for(std::set<Function*>::iterator iter = live_functions.begin(); iter != live_functions.end(); iter++) {
             Function* f = *iter;
+#if !defined(__x86_64__)
+            // Legacy entries rewrite instructions in place. The immutable
+            // x86_64 entry can resume its jump or trap without PC fixups.
             uintptr_t ip = (uintptr_t)c.ip();
             uintptr_t entry = (uintptr_t)f->getCodeBase();
             if(ip >= entry && ip < entry + PATCHABLE_ENTRY_SIZE) {
                 DEBUG("Forwarding from trap at %p", c.ip());
                 c.ip() = f->getCurrentLocation()->getBase();
             }
+#endif
             f->setTrap();
         }
 

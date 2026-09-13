@@ -20,6 +20,14 @@ tests/HelloWorld/hello
 tests/CodeLayout/obj
 tests/CodeLayout/code-layout
 
+tests/EntryPublication/obj
+tests/EntryPublication/entry-publication
+tests/EntryPublication/alignment.out.ll
+tests/EntryPublication/alignment-fixture
+tests/EntryPublication/alignment-fixture.llc.o
+tests/EntryPublication/alignment-unaligned
+tests/EntryPublication/alignment-unaligned.out
+
 tests/libquantum/obj
 tests/libquantum/libquantum
 

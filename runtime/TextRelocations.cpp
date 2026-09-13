@@ -246,6 +246,11 @@ bool stabilizer_init_text_relocations(const std::set<Function*>& functions) {
     }
 
     for(size_t i = 0; i < sorted.size(); i++) {
+        if((uintptr_t)sorted[i]->getCodeBase() % alignof(FunctionHeader) != 0) {
+            ABORT("Randomized function at %p is not aligned to %zu bytes; "
+                "rebuild with the current Stabilizer pass for atomic entry publication",
+                sorted[i]->getCodeBase(), alignof(FunctionHeader));
+        }
         if(!resolved[i]) {
             ABORT("No non-empty ELF STT_FUNC symbol found for randomized function at %p. "
                 "Do not strip binaries used with -Rcode.", sorted[i]->getCodeBase());

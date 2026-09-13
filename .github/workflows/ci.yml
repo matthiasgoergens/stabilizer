@@ -43,6 +43,7 @@ jobs:
       - name: Verify test instrumentation
         run: |
           sh tests/Harness/check-instrumentation.sh \
+            tests/EntryPublication/alignment-fixture \
             tests/HelloWorld/hello tests/CodeLayout/code-layout \
             tests/libquantum/libquantum tests/bzip2/bzip2
           clang++ tests/CodeLayout/code-layout.cpp -o /tmp/code-layout-native

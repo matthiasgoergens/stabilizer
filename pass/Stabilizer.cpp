@@ -423,6 +423,11 @@ struct StabilizerImpl {
         // of assuming that naturally-small functions have spare neighbouring
         // text which may safely be overwritten.
         f.addFnAttr("patchable-function-entry", PATCHABLE_ENTRY_SIZE);
+        // The runtime's immutable x86_64 entry loads its destination from an
+        // aligned 8-byte slot. Preserve any stronger user/backend alignment.
+        if(f.getAlign().valueOrOne() < Align(8)) {
+            f.setAlignment(Align(8));
+        }
 
         // Remove stack protection (creates implicit global references)
         f.removeFnAttr(Attribute::StackProtect);

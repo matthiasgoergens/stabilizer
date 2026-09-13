@@ -11,6 +11,7 @@
 #include "Trap.h"
 #include "Heap.h"
 #include "MemRange.h"
+#include "FunctionHeader.h"
 
 struct Function;
 struct FunctionLocation;
@@ -22,31 +23,6 @@ struct TextReloc {
     uint32_t type;      // ELF relocation type (e.g., R_X86_64_PC32)
     int64_t addend;     // ELF relocation addend (RELA)
     bool internal;      // The referenced value moves with this function
-};
-
-struct FunctionHeader {
-private:
-    union {
-        uint8_t _jmp[sizeof(Jump)];
-        uint8_t _trap[sizeof(Trap)];
-    };
-    
-    Function* _f;
-    
-public:
-    FunctionHeader(Function* f) : _f(f) {}
-    
-    void jumpTo(void* target) {
-        new(_jmp) Jump(target);
-    }
-    
-    void trap() {
-        new(_trap) Trap();
-    }
-    
-    Function* getFunction() {
-        return _f;
-    }
 };
 
 // The pass reserves PATCHABLE_ENTRY_SIZE bytes at every randomized entry. Fail
@@ -75,7 +51,9 @@ private:
      */
     inline void forward(void* target) {
         _header->jumpTo(target);
+#if !defined(__x86_64__)
         flush_icache(_header, sizeof(FunctionHeader));
+#endif
     }
     
     void copyTo(void* target);
