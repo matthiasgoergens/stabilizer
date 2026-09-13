@@ -2,6 +2,7 @@ ROOT = ../..
 .DELETE_ON_ERROR:
 TARGETS = entry-publication
 SRCS = entry-publication.cpp
+INCLUDES = $(wildcard $(ROOT)/runtime/*.h)
 
 include $(ROOT)/common.mk
 
@@ -10,7 +11,6 @@ include $(ROOT)/common.mk
 CXXFLAGS = -O2 -pthread
 LIBS = pthread
 FILECHECK ?= $(shell llvm-config --bindir)/FileCheck
-INCLUDES += $(wildcard $(ROOT)/runtime/*.h)
 
 alignment.out.ll: alignment.ll $(ROOT)/LLVMStabilizer.$(SHLIB_SUFFIX)
 	opt --load-pass-plugin=$(ROOT)/LLVMStabilizer.$(SHLIB_SUFFIX) \
@@ -19,7 +19,7 @@ alignment.out.ll: alignment.ll $(ROOT)/LLVMStabilizer.$(SHLIB_SUFFIX)
 clean::
 	rm -f alignment.out.ll alignment-fixture alignment-fixture.bc \
 	    alignment-fixture.opt.bc alignment-fixture.llc.o \
-	    alignment-unaligned alignment-unaligned.out
+	    alignment-unaligned alignment-unaligned.out dependency-check.out
 
 alignment-fixture: alignment.c $(ROOT)/szc $(ROOT)/LLVMStabilizer.$(SHLIB_SUFFIX)
 	$(ROOT)/szc -v -Rcode alignment.c -o $@
@@ -33,3 +33,4 @@ test:: entry-publication alignment.out.ll alignment-fixture alignment-unaligned
 	$(FILECHECK) alignment.ll --input-file=alignment.out.ll
 	LD_LIBRARY_PATH=$(ROOT) ./alignment-fixture
 	sh check-unaligned.sh
+	sh check-dependencies.sh

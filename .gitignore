@@ -27,6 +27,7 @@ tests/EntryPublication/alignment-fixture
 tests/EntryPublication/alignment-fixture.llc.o
 tests/EntryPublication/alignment-unaligned
 tests/EntryPublication/alignment-unaligned.out
+tests/EntryPublication/dependency-check.out
 
 tests/libquantum/obj
 tests/libquantum/libquantum
