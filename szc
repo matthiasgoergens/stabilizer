@@ -161,11 +161,18 @@ def compile(input):
 		run([LLVM_AS, '-o', args.o, ll])
 
 	else:
-		# Clang adds `optnone` at -O0, which prevents later `opt` passes
-		# (including `default<O*>` and lowering passes) from running. That
-		# breaks Stabilizer's assumptions (e.g., we rely on switch lowering to
-		# avoid jump tables). Disable that behavior.
-		cmd = [args.frontend, '-O0', '-Xclang', '-disable-O0-optnone', '-c', '-emit-llvm', '-o', args.o]
+		# Optimise each translation unit at the requested level; transform()
+		# subsequently optimises the linked module before instrumentation.
+		# Always using -O0 leaves noinline on ordinary inline helpers even if
+		# optnone is disabled, preventing subsequent opt -O2 from inlining them.
+		# Do not disable all Clang LLVM passes: that also silently suppresses
+		# requested instrumentation such as AddressSanitizer.
+		if args.O > 0:
+			frontend_flags = ['-O' + str(args.O)]
+		else:
+			# Keep -O0 semantics, but let required lowering/instrumentation run.
+			frontend_flags = ['-O0', '-Xclang', '-disable-O0-optnone']
+		cmd = [args.frontend] + frontend_flags + ['-c', '-emit-llvm', '-o', args.o]
 		cmd += arg('g', args.g)
 		cmd += arg('I', args.I)
 		cmd += arg('f', args.f)
@@ -251,4 +258,3 @@ if not args.c:
 	linked = link(object_files)
 	transformed = transform(linked)
 	codegen(transformed)
-
