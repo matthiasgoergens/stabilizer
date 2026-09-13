@@ -42,6 +42,27 @@ after the epoch and destination checks succeed. Thus there are 42 positive
 processes and two negative controls. Each process has an
 external timeout; epoch waiting also has an internal monotonic deadline.
 
+`--workload adler` selects the unchanged `AdlerTiming.lean` workload from
+Matthias Goergens's faster-lean Adler direct-fold investigation. This uses
+the same released Lean compiler/runtime, without private compiler options;
+it is distinct from experiments using faster-lean's development compiler.
+Both native and instrumented C builds use `-O3` for Adler; the original loop
+fixture continues to use `-O2`.
+
+Adler checks boxed-array fold, direct byte-array fold and indexed recurrence
+against an independent high-byte LCG input generator and zlib Adler checksum.
+Sizes 0, 1 and 1024 with 0, 1 and 3 repetitions, plus 256 KiB with eight
+repetitions and 1 MiB with two, give eleven cases per kernel. The final state
+chains repetitions; warm-up starts separately from `(1, 0)`. Each case runs
+natively and instrumented on both callback thread modes. Including automatic
+epochs gives 134 positive processes and the same two negative controls.
+CI runs both workloads as mandatory steps and preserves their observations
+separately. Adler's clock-call exposure has the same scope limits as the
+loop fixture: it does not prove that the hot kernel moves mid-loop.
+The lightweight `test_check.py` runner tests also run in CI: zero elapsed
+time is valid (clock resolution is not under test), while malformed output,
+wrong checksums and missing code movement are rejected.
+
 This is a separate CI step, not part of dependency-light `make test`, because
 the pinned Lean release archive is approximately 570 MB. CI does not skip it.
 The ordinary C pthread regressions remain in `make test`. Observer calls

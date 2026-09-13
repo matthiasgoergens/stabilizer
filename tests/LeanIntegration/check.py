@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -27,9 +28,35 @@ def checksum(n, seed):
     return x
 
 
-def valid_output(result, instrumented):
-    expected = [str(checksum(1000, 2611923443488327891)),
-                str(checksum(500, 2611923443488327891))]
+SEED = 2611923443488327891
+
+
+def adler_checksum(size, repetitions):
+    data = bytearray()
+    state = SEED
+    for _ in range(size):
+        data.append((state // (1 << 24)) % 256)
+        state = (1664525 * state + 1013904223) % (1 << 32)
+    warm = zlib.adler32(data)
+    final = 1
+    for _ in range(repetitions):
+        final = zlib.adler32(data, final)
+    return [final & 65535, final >> 16, warm & 65535, warm >> 16]
+
+
+def workload_cases(workload):
+    if workload == 'loops':
+        expected = [checksum(1000, SEED), checksum(500, SEED)]
+        return [(variant, [variant, '1000', str(SEED)], expected) for variant in VARIANTS]
+    sizes = [(size, reps) for size in (0, 1, 1024) for reps in (0, 1, 3)]
+    sizes += [(262144, 8), (1048576, 2)]
+    oracle = {(size, reps): adler_checksum(size, reps) for size, reps in sizes}
+    return [(f'{kernel}-{size}-{reps}', [kernel, str(size), str(reps), str(SEED)],
+             oracle[size, reps]) for kernel in ('helper', 'direct', 'reference')
+            for size, reps in sizes]
+
+
+def valid_output(result, instrumented, expected):
     lines = result.stdout.splitlines()
     crossing = 'Lean integration: completed epoch crossing' in result.stderr
     records = re.findall(r'^Lean integration: code PCs (0x[0-9a-f]+) (0x[0-9a-f]+) '
@@ -40,7 +67,9 @@ def valid_output(result, instrumented):
     exposed = (pcs[0] != pcs[2] and pcs[1] != pcs[3]) if instrumented else (
         pcs[0] == pcs[2] and pcs[1] == pcs[3])
     return (result.returncode == 0 and len(lines) == 2
-            and all(line.split()[1:] == expected for line in lines)
+            and all(len(line.split()) == len(expected) + 1
+                    and line.split()[0].isdigit()
+                    and line.split()[1:] == list(map(str, expected)) for line in lines)
             and crossing == instrumented
             and all(pcs) and exposed
             and result.stderr.count('Lean integration: two callbacks checked') == 1)
@@ -54,11 +83,13 @@ def main():
     parser.add_argument('--output', required=True, type=Path,
                         help='new directory for generated code and raw observations')
     parser.add_argument('--llvm-bin', type=Path)
+    parser.add_argument('--workload', choices=('loops', 'adler'), default='loops')
     args = parser.parse_args()
     lean = args.lean_root.resolve()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
     env = dict(os.environ)
+    env.pop('LD_PRELOAD', None)
     for key in list(env):
         if key.startswith(('LEAN_', 'STABILIZER_')):
             del env[key]
@@ -92,8 +123,12 @@ def main():
         version = require_success('lean-version', [lean / 'bin/lean', '--version'])
         assert f'version {VERSION},' in version.stdout and REVISION in version.stdout
         require_success('clang-version', ['clang', '--version'])
+        source = 'Variants.lean' if args.workload == 'loops' else 'AdlerTiming.lean'
+        cases = workload_cases(args.workload)
+        control = next(case for case in cases if case[0] == (
+            'id-while' if args.workload == 'loops' else 'helper-1024-3'))
         require_success('generate', [lean / 'bin/lean', '--root=.',
-                                    f'--c={out / "Variants.c"}', 'Variants.lean'])
+                                    f'--c={out / "Variants.c"}', source])
         observer = ['clang', '-O2', '-fPIC', '-shared', '-I', lean / 'include',
                     HERE / 'observer.c', '-L', lean / 'lib/lean', '-lleanshared']
         require_success('observer-build', [*observer, '-o', out / 'libobserver.so'])
@@ -101,14 +136,15 @@ def main():
         fake.mkdir()
         require_success('fake-observer-build', [*observer, '-DLEAN_INTEGRATION_FAKE_PC',
                                               '-o', fake / 'libobserver.so'])
-        common = ['-O2', '-I', lean / 'include', '-I', out, HERE / 'driver.c',
+        optimisation = '-O2' if args.workload == 'loops' else '-O3'
+        common = [optimisation, '-I', lean / 'include', '-I', out, HERE / 'driver.c',
                   '-L', out, '-lobserver', '-L', lean / 'lib/lean', '-l', 'leanshared', '-l', 'pthread']
         require_success('native-build', ['clang', *common, '-o', out / 'native'])
         require_success('instrumented-build', [sys.executable, ROOT / 'szc', '-v',
                                               '-Rcode', *common, '-o', out / 'instrumented'])
         require_success('instrumentation', ['sh', ROOT / 'tests/Harness/check-instrumentation.sh',
                                             out / 'instrumented'])
-        inputs = [HERE / 'Variants.lean', HERE / 'driver.c', HERE / 'observer.c', Path(__file__),
+        inputs = [HERE / source, HERE / 'driver.c', HERE / 'observer.c', Path(__file__),
                   out / 'libobserver.so', fake / 'libobserver.so',
                   out / 'Variants.c', out / 'native', out / 'instrumented',
                   ROOT / 'LLVMStabilizer.so', ROOT / 'libstabilizer.so',
@@ -125,14 +161,14 @@ def main():
         before = hashes()
         (out / 'inputs.json').write_text(json.dumps(before, indent=2) + '\n')
         count = 0
-        for variant in VARIANTS:
+        for variant, arguments, expected in cases:
             for thread in ('0', '1'):
                 for binary in ('native', 'instrumented'):
                     env['LEAN_MAIN_USE_THREAD'] = thread
                     result = run(f'{variant}-{thread}-{binary}',
                                  ['timeout', '--kill-after=1s', '10s', out / binary,
-                                  variant, '1000', '2611923443488327891'])
-                    assert valid_output(result, binary == 'instrumented'), result
+                                  *arguments])
+                    assert valid_output(result, binary == 'instrumented', expected), result
                     count += 1
         # Automatic publication uses the same callback and verifies actual
         # counter progress; no guessed sleep stands in for an observed epoch.
@@ -140,23 +176,23 @@ def main():
         for thread in ('0', '1'):
             env['LEAN_MAIN_USE_THREAD'] = thread
             result = run(f'automatic-{thread}', ['timeout', '--kill-after=1s', '10s',
-                         out / 'instrumented', 'id-while', '1000', '2611923443488327891'])
-            assert valid_output(result, True), result
+                         out / 'instrumented', *control[1]])
+            assert valid_output(result, True, control[2]), result
             count += 1
         # Calibrate the gate: retained startup alone must not satisfy it.
         env.update(STABILIZER_MAX_EPOCHS='1', STABILIZER_INTERVAL_MS='0')
         result = run('no-epoch-negative', ['timeout', '--kill-after=1s', '10s',
-                     out / 'instrumented', 'id-while', '1000', '2611923443488327891'])
+                     out / 'instrumented', *control[1]])
         assert result.returncode == 1 and 'epoch request rejected' in result.stderr, result
-        assert not valid_output(result, True)
+        assert not valid_output(result, True, control[2])
         # A counter/destination-only gate must not accept a broken observer.
         env.update(STABILIZER_MAX_EPOCHS='1000',
                    LD_LIBRARY_PATH=f'{fake}:{out}:{ROOT}:{lean / "lib/lean"}')
         result = run('fixed-pc-negative', ['timeout', '--kill-after=1s', '10s',
-                     out / 'instrumented', 'id-while', '1000', '2611923443488327891'])
+                     out / 'instrumented', *control[1]])
         assert result.returncode == 1 and 'application code PCs did not change' in result.stderr, result
         assert 'Lean integration: completed epoch crossing' in result.stderr, result
-        assert not valid_output(result, True)
+        assert not valid_output(result, True, control[2])
         assert before == hashes(), 'inputs changed during checks'
         print(f'PASS: {count} fresh-process checksum/thread/epoch/PC cases and two negative controls')
 

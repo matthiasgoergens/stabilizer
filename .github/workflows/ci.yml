@@ -114,6 +114,7 @@ jobs:
 
       - name: Check generated Lean code across relocation epochs
         run: |
+          uv run --no-project python -B tests/LeanIntegration/test_check.py
           uv run --no-project --with setuptools==84.0.0 \
             tests/LeanIntegration/check.py \
             --lean-root "$RUNNER_TEMP/lean-4.33.1-linux" \
@@ -129,3 +130,21 @@ jobs:
             tests/LeanIntegration/build/ci/*.json
             tests/LeanIntegration/build/ci/*.jsonl
             tests/LeanIntegration/build/ci/Variants.c
+
+      - name: Check Adler code across relocation epochs
+        run: |
+          uv run --no-project --with setuptools==84.0.0 \
+            tests/LeanIntegration/check.py --workload adler \
+            --lean-root "$RUNNER_TEMP/lean-4.33.1-linux" \
+            --output tests/LeanIntegration/build/adler-ci
+
+      - name: Preserve Adler integration observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: adler-integration-observations
+          if-no-files-found: ignore
+          path: |
+            tests/LeanIntegration/build/adler-ci/*.json
+            tests/LeanIntegration/build/adler-ci/*.jsonl
+            tests/LeanIntegration/build/adler-ci/Variants.c
