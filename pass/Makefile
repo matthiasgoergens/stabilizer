@@ -2,6 +2,7 @@ ROOT = ..
 
 TARGETS = $(ROOT)/LLVMStabilizer.$(SHLIB_SUFFIX)
 LIBS = 
+INCLUDES = $(wildcard *.h) $(ROOT)/runtime/Instrumentation.h
 
 include $(ROOT)/common.mk
 

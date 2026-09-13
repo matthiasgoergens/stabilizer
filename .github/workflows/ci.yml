@@ -43,6 +43,8 @@ jobs:
       - name: Verify test instrumentation
         run: |
           sh tests/Harness/check-instrumentation.sh \
+            tests/RetainedCode/retained-code \
+            tests/RetainedAdmission/admission-plain \
             tests/RelocationTypes/relocation-types \
             tests/EntryPublication/alignment-fixture \
             tests/HelloWorld/hello tests/CodeLayout/code-layout \

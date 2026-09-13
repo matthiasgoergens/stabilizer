@@ -160,6 +160,14 @@ public:
     inline FunctionLocation* getCurrentLocation() {
         return _current;
     }
+
+    inline void* getPublishedLocation() {
+#if defined(__x86_64__)
+        return _header->destination();
+#else
+        return NULL;
+#endif
+    }
 };
 
 #endif

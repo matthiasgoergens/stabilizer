@@ -1,0 +1,7 @@
+/admission-*
+/lib*.so
+/*.bc
+/heap.ll
+/stack.ll
+/*.o
+/*.out

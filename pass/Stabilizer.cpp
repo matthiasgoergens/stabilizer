@@ -17,6 +17,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "../runtime/Instrumentation.h"
 
 #define DEBUG_TYPE "stabilizer"
 
@@ -41,6 +42,7 @@ cl::opt<bool> stabilize_stack  ("stabilize-stack",   cl::init(false), cl::desc("
 cl::opt<bool> stabilize_code   ("stabilize-code",    cl::init(false), cl::desc("Randomize function placement"));
 
 struct StabilizerImpl {
+    Function* registerModule;
     Function* registerFunction;
     Function* registerConstructor;
     Function* registerStackPad;
@@ -197,6 +199,11 @@ struct StabilizerImpl {
         // Create a new constructor
         Function* ctor = makeConstructor(m, "stabilizer.module_ctor");
         BasicBlock* ctor_bb = BasicBlock::Create(m.getContext(), "", ctor);
+        uint32_t flags = (stabilize_code ? STABILIZER_CODE : 0) |
+                         (stabilize_heap ? STABILIZER_HEAP : 0) |
+                         (stabilize_stack ? STABILIZER_STACK : 0);
+        CallInst::Create(registerModule,
+            {getInt(m, 32, STABILIZER_MODULE_ABI, false), getInt(m, 32, flags, false)}, "", ctor_bb);
 
         // Enable code randomization
         if(stabilize_code) {
@@ -873,6 +880,16 @@ struct StabilizerImpl {
      * \arg m The module to transform
      */
     void declareRuntimeFunctions(Module& m) {
+        FunctionType* moduleType = FunctionType::get(Type::getVoidTy(m.getContext()),
+            {Type::getInt32Ty(m.getContext()), Type::getInt32Ty(m.getContext())}, false);
+        registerModule = m.getFunction("stabilizer_register_module");
+        if(registerModule && (registerModule->getFunctionType() != moduleType ||
+                              !registerModule->isDeclaration()))
+            report_fatal_error("incompatible stabilizer_register_module declaration");
+        if(!registerModule)
+            registerModule = Function::Create(moduleType, Function::ExternalLinkage,
+                "stabilizer_register_module", &m);
+        registerModule->addFnAttr(Attribute::NonLazyBind);
         // Declare the register_function runtime function
         // void stabilizer_register_function(
         //    void* codeBase, void* tableBase, size_t tableSize,

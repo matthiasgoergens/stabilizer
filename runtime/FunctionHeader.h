@@ -48,6 +48,7 @@ public:
     }
 
     void trap() { jumpTo(_trap); }
+    void* destination() { return _target.load(std::memory_order_acquire); }
 
     void* trapAddress() { return _trap; }
 

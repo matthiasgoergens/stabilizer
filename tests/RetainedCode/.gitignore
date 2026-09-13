@@ -1,0 +1,4 @@
+/obj/
+/*.llc.o
+/libnative-helper.so
+/retained-code
