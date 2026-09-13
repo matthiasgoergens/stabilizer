@@ -1,0 +1,8 @@
+/obj/
+/thread-local
+/native
+/types.out.ll
+/*.llc.o
+/*.out
+/pic-tls
+/pic-ie

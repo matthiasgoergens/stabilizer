@@ -42,6 +42,8 @@ static const char* relocTypeName(uint32_t type) {
             return "R_X86_64_GOTTPOFF";
         case R_X86_64_GOTPC32_TLSDESC:
             return "R_X86_64_GOTPC32_TLSDESC";
+        case R_X86_64_TPOFF32:
+            return "R_X86_64_TPOFF32";
         default:
             return "UNKNOWN";
     }
@@ -55,10 +57,6 @@ static bool relocSupported(uint32_t type) {
         case R_X86_64_GOTPCRELX:
         case R_X86_64_REX_GOTPCRELX:
         case R_X86_64_GOTPC32:
-        case R_X86_64_TLSGD:
-        case R_X86_64_TLSLD:
-        case R_X86_64_GOTTPOFF:
-        case R_X86_64_GOTPC32_TLSDESC:
             return true;
         default:
             return false;
@@ -343,6 +341,15 @@ bool stabilizer_init_text_relocations(const std::set<Function*>& functions) {
                     f->getCodeBase(), (size_t)(P - (uintptr_t)f->getCodeBase()));
             }
 
+            if(type == R_X86_64_TLSGD || type == R_X86_64_TLSLD ||
+               type == R_X86_64_GOTTPOFF || type == R_X86_64_GOTPC32_TLSDESC) {
+                // --emit-relocs can preserve these labels after the linker
+                // rewrites the instruction (and its paired call) to local-exec
+                // TLS. Treating the old field as PC-relative corrupts code.
+                ABORT("TLS relocation %s requires linker-relaxation-aware support; "
+                    "use local-exec TLS with -Rcode", relocTypeName(type));
+            }
+
             if(relocSupported(type)) {
                 bool internal = false;
 
@@ -392,7 +399,11 @@ bool stabilizer_init_text_relocations(const std::set<Function*>& functions) {
                 continue;
             }
 
-            if(relocSafeToIgnore(type)) {
+            // A resolved local-exec TLS offset is relative to the executing
+            // thread pointer, not to P. Moving the instruction leaves it
+            // unchanged. Keep this after the patchable-entry rejection above:
+            // only the body may contain an actual TLS operand.
+            if(relocSafeToIgnore(type) || type == R_X86_64_TPOFF32) {
                 continue;
             }
 

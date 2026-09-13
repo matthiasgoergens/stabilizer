@@ -168,8 +168,14 @@ Location queries expose observations, not ownership or a reclamation API.
 Initial header installation requires quiescence: native DSO constructors must
 not start concurrent calls into instrumented executable text before runtime
 initialisation. Instrumented registration after startup is rejected, as is
-ordinary `fork()` in retained mode. Raw clone/fork system calls, instrumented
-module unloading, general exception unwinding and all TLS models are not
+ordinary `fork()` in retained mode. Local-exec TLS offsets (`R_X86_64_TPOFF32`)
+are preserved across code relocation and tested with distinct thread values
+and stable per-thread addresses. Other TLS relocation forms are not supported;
+TLSGD/TLSLD/GOTTPOFF/TLSDESC address relocations are rejected because retained
+linker relocation labels may describe instructions that were already relaxed.
+Do not infer support from a TLS type merely being PC-relative before linking.
+Raw clone/fork system calls, instrumented
+module unloading and general exception unwinding are not
 supported by this prototype. Stop/join runs on normal main return and via
 `atexit`; retained code is not freed there because later exit callbacks may
 still enter it. No performance or statistical-normality claim follows from

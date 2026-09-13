@@ -135,10 +135,6 @@ void Function::applyTextRelocs(void* source, void* dest) {
             case R_X86_64_GOTPCRELX:
             case R_X86_64_REX_GOTPCRELX:
             case R_X86_64_GOTPC32:
-            case R_X86_64_TLSGD:
-            case R_X86_64_TLSLD:
-            case R_X86_64_GOTTPOFF:
-            case R_X86_64_GOTPC32_TLSDESC:
             {
                 int64_t newVal64 = (int64_t)oldVal - (int64_t)delta;
                 if(newVal64 < std::numeric_limits<int32_t>::min() || newVal64 > std::numeric_limits<int32_t>::max()) {

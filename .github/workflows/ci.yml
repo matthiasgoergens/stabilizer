@@ -43,6 +43,7 @@ jobs:
       - name: Verify test instrumentation
         run: |
           sh tests/Harness/check-instrumentation.sh \
+            tests/ThreadLocal/thread-local \
             tests/RetainedCode/retained-code \
             tests/RetainedAdmission/admission-plain \
             tests/RelocationTypes/relocation-types \

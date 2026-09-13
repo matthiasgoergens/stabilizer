@@ -566,6 +566,11 @@ struct StabilizerImpl {
                 return true;
             }
 
+        } else if(auto* global = dyn_cast<GlobalVariable>(v)) {
+            // TLS addresses belong to the executing thread, not a shared
+            // relocation table. In particular llvm.threadlocal.address must
+            // retain its GlobalValue operand for target-specific lowering.
+            return !global->isThreadLocal();
         } else if(isa<GlobalValue>(v)) {
             return true;
 
