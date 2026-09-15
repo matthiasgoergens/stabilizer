@@ -43,6 +43,13 @@ jobs:
       - name: Verify test instrumentation
         run: |
           sh tests/Harness/check-instrumentation.sh \
+            tests/CodeSource/build/admission \
+            tests/ThreadLocal/thread-local \
+            tests/ThreadLocal/shared-gd tests/ThreadLocal/shared-ie \
+            tests/RetainedCode/retained-code \
+            tests/RetainedAdmission/admission-plain \
+            tests/RelocationTypes/relocation-types \
+            tests/EntryPublication/alignment-fixture \
             tests/HelloWorld/hello tests/CodeLayout/code-layout \
             tests/libquantum/libquantum tests/bzip2/bzip2
           clang++ tests/CodeLayout/code-layout.cpp -o /tmp/code-layout-native
@@ -89,3 +96,79 @@ jobs:
           test "$status" -ne 0
           grep --fixed-strings \
             "does not support -fcf-protection=branch/full" /tmp/cet.out
+
+      - name: Install uv for the Lean integration runner
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.12.10"
+
+      - name: Fetch the pinned Lean compiler and matching runtime
+        working-directory: ${{ runner.temp }}
+        run: |
+          sudo apt-get install --yes zstd
+          curl --fail --location --silent --show-error \
+            --output lean-4.33.1-linux.tar.zst \
+            https://github.com/leanprover/lean4/releases/download/v4.33.1/lean-4.33.1-linux.tar.zst
+          sha256sum --check "$GITHUB_WORKSPACE/tests/LeanIntegration/lean.sha256"
+          tar --zstd --extract --file lean-4.33.1-linux.tar.zst
+
+      - name: Check generated Lean code across relocation epochs
+        run: |
+          uv run --no-project python -B tests/LeanIntegration/test_check.py
+          uv run --no-project --with setuptools==84.0.0 \
+            tests/LeanIntegration/check.py \
+            --lean-root "$RUNNER_TEMP/lean-4.33.1-linux" \
+            --output tests/LeanIntegration/build/ci
+
+      - name: Preserve Lean integration observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lean-integration-observations
+          if-no-files-found: ignore
+          path: |
+            tests/LeanIntegration/build/ci/*.json
+            tests/LeanIntegration/build/ci/*.jsonl
+            tests/LeanIntegration/build/ci/Variants.c
+
+      - name: Check Adler code across relocation epochs
+        run: |
+          uv run --no-project --with setuptools==84.0.0 \
+            tests/LeanIntegration/check.py --workload adler \
+            --lean-root "$RUNNER_TEMP/lean-4.33.1-linux" \
+            --output tests/LeanIntegration/build/adler-ci
+
+      - name: Preserve Adler integration observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: adler-integration-observations
+          if-no-files-found: ignore
+          path: |
+            tests/LeanIntegration/build/adler-ci/*.json
+            tests/LeanIntegration/build/adler-ci/*.jsonl
+            tests/LeanIntegration/build/adler-ci/Variants.c
+
+      - name: Check repeated Adler kernel execution across epochs
+        run: |
+          uv run --no-project python -B tests/LeanIntegration/test_repeated.py
+          uv run --no-project python -B tests/LeanIntegration/test_observer.py \
+            --lean-root "$RUNNER_TEMP/lean-4.33.1-linux" \
+            --clang /usr/lib/llvm-21/bin/clang \
+            --output tests/LeanIntegration/build/observer-ci
+          uv run --no-project --with setuptools==84.0.0 python -B \
+            tests/LeanIntegration/repeated.py \
+            --lean-root "$RUNNER_TEMP/lean-4.33.1-linux" \
+            --output tests/LeanIntegration/build/repeated-ci
+
+      - name: Preserve repeated Adler observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: repeated-adler-observations
+          if-no-files-found: ignore
+          path: |
+            tests/LeanIntegration/build/repeated-ci/*.json
+            tests/LeanIntegration/build/repeated-ci/*.jsonl
+            tests/LeanIntegration/build/repeated-ci/*.c
+            tests/LeanIntegration/build/observer-ci/*.jsonl

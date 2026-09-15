@@ -124,3 +124,92 @@ The `-norm` flag tests the results for normality using the Shapiro-Wilk test.
 
 The `-all` flag dumps all results to console, suitable for pasting into a
 spreadsheet or CSV file.
+
+## Code placement reservoirs
+
+Code placement uses a separate reservoir for every active rounded allocation
+size class, including functions larger than 256 bytes. Allocation exchanges
+a new object with a randomly selected held object; legacy freeing exchanges
+the freed object with a held object before releasing the latter. This
+restores the per-class mechanism instead of treating the historical 256-object
+buffer count as a 256-byte cutoff. The data heap is unchanged.
+
+`STABILIZER_MAX_SHUFFLE_BYTES` controls the total held rounded payload bytes
+in both legacy and retained modes. Its default is 16777216 (16 MiB), with a
+range of 1–1073741824. Startup admits at least two slots for each active code
+class, then shares remaining space up to 256 slots per class. Insufficient
+budgets and unsupported sizes are rejected before function headers are
+installed; there is no unshuffled large-code fallback. Slots are filled lazily.
+
+This is separate from the retained logical copied-body budget. It excludes
+allocation headers, chunk slack, mappings, metadata and live code copies, so
+it is **not an RSS limit**. Reservoirs have process lifetime. Their successive
+choices are not independent layout samples merely because they use an RNG;
+workload exposure, layout diversity and timing assumptions need measurement.
+
+## Experimental retained code generations (Linux x86_64)
+
+Code randomisation sets `frame-pointer=all` on instrumented definitions,
+including imported bitcode with conflicting frame-pointer attributes. Naked
+functions are rejected under `-Rcode` because they lack a normal prologue.
+This does not add frame pointers to native libraries or make arbitrary native
+stacks unwindable.
+
+The default runtime still assumes a single application stack when reclaiming
+relocated code. It is not safe for general pthread workloads. The opt-in
+`STABILIZER_CODE_MODE=retained` mode instead prepares all initial code copies
+before deferred constructors/main and uses a normal maintenance thread to
+publish later copies. Old copies are retained, including through shutdown,
+so a worker blocked in native code can return to an earlier generation.
+This is bounded experimental sampling, not a complete thread-safe replacement
+for all Stabilizer modes or an unbounded reclamation implementation.
+
+Rebuild with the current pass and use `-Rcode` only. Heap and stack
+instrumentation are rejected, including reported mixed-module instrumentation.
+Legacy unreported heap-wrapper calls are rejected before touching the shared
+runtime heap. Module metadata cannot establish that every old object has been
+rebuilt; compatible instrumentation throughout the executable is required.
+
+Configuration (strict unsigned decimal values):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `STABILIZER_MAX_EPOCHS` | `8` | Maximum completed generations, including the initial eager generation; range 1–1000000 |
+| `STABILIZER_MAX_CODE_BYTES` | `67108864` | Logical copied body-byte budget; range 1–1073741824 |
+| `STABILIZER_INTERVAL_MS` | `500` | Delay between publication passes; range 0–3600000; zero means explicitly requested epochs only |
+
+The smaller generation/byte budget wins. The byte budget is **not an RSS
+limit**: allocation chunks, bins, metadata and shuffle overhead add memory.
+Once exhausted, sampling stops and the final layout stays active. Startup
+prints an experimental-mode notice; exhaustion is exposed by the API, not
+logged by the maintenance thread. Measurements must record/check that state
+rather than silently treating the remainder as continuing layout sampling.
+
+The C API in `runtime/Instrumentation.h` provides a completed-epoch counter,
+an exhaustion flag, a published-location query and `stabilizer_request_epoch`.
+Requests coalesce; an accepted request is not a promise of one unique epoch.
+Shutdown cancels pending requests; callers waiting for progress need a deadline.
+The counter advances after a full publication pass; individual function
+destinations are updated sequentially, not as an atomic whole-program switch.
+Location queries expose observations, not ownership or a reclamation API.
+
+Initial header installation requires quiescence: native DSO constructors must
+not start concurrent calls into instrumented executable text before runtime
+initialisation. Instrumented registration after startup is rejected, as is
+ordinary `fork()` in retained mode. Local-exec TLS offsets (`R_X86_64_TPOFF32`)
+are preserved across code relocation and tested with distinct thread values
+and stable per-thread addresses. The LLVM TLS-address intrinsic is outlined
+into small fixed, non-inlined helpers; these are not randomised. Canonical
+Clang TLS therefore uses native compiler/linker lowering, including tested
+PIC global-dynamic and initial-exec access to TLS in a native shared library.
+This adds a helper call and excludes the resolver itself from layout sampling;
+its measurement cost has not been established. Direct TLS IR forms that still
+emit TLSGD/TLSLD/GOTTPOFF/TLSDESC in copied bodies are rejected because retained
+linker relocation labels may describe instructions that were already relaxed.
+Do not infer support from a TLS type merely being PC-relative before linking.
+Raw clone/fork system calls, instrumented
+module unloading and general exception unwinding are not
+supported by this prototype. Stop/join runs on normal main return and via
+`atexit`; retained code is not freed there because later exit callbacks may
+still enter it. No performance or statistical-normality claim follows from
+passing the correctness regressions.

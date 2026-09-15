@@ -17,6 +17,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "../runtime/Instrumentation.h"
 
 #define DEBUG_TYPE "stabilizer"
 
@@ -41,6 +42,7 @@ cl::opt<bool> stabilize_stack  ("stabilize-stack",   cl::init(false), cl::desc("
 cl::opt<bool> stabilize_code   ("stabilize-code",    cl::init(false), cl::desc("Randomize function placement"));
 
 struct StabilizerImpl {
+    Function* registerModule;
     Function* registerFunction;
     Function* registerConstructor;
     Function* registerStackPad;
@@ -164,6 +166,8 @@ struct StabilizerImpl {
             }
         }
 
+        if(stabilize_code) outlineTLSAddresses(m, local_functions);
+
         declareRuntimeFunctions(m);
 
         std::map<Function*, GlobalVariable*> stackPads;
@@ -197,6 +201,11 @@ struct StabilizerImpl {
         // Create a new constructor
         Function* ctor = makeConstructor(m, "stabilizer.module_ctor");
         BasicBlock* ctor_bb = BasicBlock::Create(m.getContext(), "", ctor);
+        uint32_t flags = (stabilize_code ? STABILIZER_CODE : 0) |
+                         (stabilize_heap ? STABILIZER_HEAP : 0) |
+                         (stabilize_stack ? STABILIZER_STACK : 0);
+        CallInst::Create(registerModule,
+            {getInt(m, 32, STABILIZER_MODULE_ABI, false), getInt(m, 32, flags, false)}, "", ctor_bb);
 
         // Enable code randomization
         if(stabilize_code) {
@@ -236,6 +245,42 @@ struct StabilizerImpl {
         Function *main = m.getFunction("main");
         if(main != NULL) {
             main->setName("stabilizer_main");
+        }
+    }
+
+    // Resolve TLS in fixed code. Linker TLS relaxation may rewrite both the
+    // address sequence and its call while preserving the old relocation labels.
+    // Helpers created after local_functions was captured are never registered
+    // or copied, so their native TLS lowering remains intact.
+    void outlineTLSAddresses(Module& m, const std::set<Function*>& functions) {
+        std::map<GlobalVariable*, Function*> accessors;
+        std::vector<CallInst*> calls;
+        for(Function* f : functions) {
+            for(BasicBlock& block : *f) {
+                for(Instruction& instruction : block) {
+                    auto* call = dyn_cast<CallInst>(&instruction);
+                    if(call && call->getCalledFunction() &&
+                       call->getCalledFunction()->getIntrinsicID() == Intrinsic::threadlocal_address)
+                        calls.push_back(call);
+                }
+            }
+        }
+        for(CallInst* call : calls) {
+            auto* global = dyn_cast<GlobalVariable>(call->getArgOperand(0));
+            if(!global || !global->isThreadLocal())
+                report_fatal_error("Stabilizer TLS address requires a thread-local GlobalVariable");
+            Function*& accessor = accessors[global];
+            if(!accessor) {
+                accessor = Function::Create(FunctionType::get(call->getType(), false),
+                    Function::InternalLinkage, "stabilizer.tls." + global->getName(), &m);
+                accessor->addFnAttr(Attribute::NoInline);
+                BasicBlock* body = BasicBlock::Create(m.getContext(), "", accessor);
+                Value* address = CallInst::Create(call->getCalledFunction(), {global}, "", body);
+                ReturnInst::Create(m.getContext(), address, body);
+            }
+            Value* address = CallInst::Create(accessor, {}, "tls.address", call);
+            call->replaceAllUsesWith(address);
+            call->eraseFromParent();
         }
     }
 
@@ -418,11 +463,25 @@ struct StabilizerImpl {
     std::vector<Value*> randomizeCode(Module& m, Function& f) {
         static const char* PATCHABLE_ENTRY_SIZE = "32";
 
+        if(f.hasFnAttribute(Attribute::Naked)) {
+            report_fatal_error("Stabilizer -Rcode does not support naked functions");
+        }
+        // Legacy re-randomisation walks frames. The llc command-line setting
+        // only supplies a default and cannot override an incoming function's
+        // explicit none/non-leaf attribute. Make this requirement explicit on
+        // every code-randomised definition, including imported bitcode.
+        f.addFnAttr("frame-pointer", "all");
+
         // The runtime replaces the first 32 bytes with its trap/forwarding
         // header.  Make those bytes an explicit part of this function instead
         // of assuming that naturally-small functions have spare neighbouring
         // text which may safely be overwritten.
         f.addFnAttr("patchable-function-entry", PATCHABLE_ENTRY_SIZE);
+        // The runtime's immutable x86_64 entry loads its destination from an
+        // aligned 8-byte slot. Preserve any stronger user/backend alignment.
+        if(f.getAlign().valueOrOne() < Align(8)) {
+            f.setAlignment(Align(8));
+        }
 
         // Remove stack protection (creates implicit global references)
         f.removeFnAttr(Attribute::StackProtect);
@@ -498,7 +557,9 @@ struct StabilizerImpl {
                     );
 
                     Value* loaded = new LoadInst(
-                        slot->getType(),
+                        // The slot address is an opaque pointer, not the type
+                        // of its stored value (which may be an integer cast).
+                        c->getType(),
                         slot,
                         c->getName()+".indirect",
                         insertion_point
@@ -552,6 +613,11 @@ struct StabilizerImpl {
                 return true;
             }
 
+        } else if(auto* global = dyn_cast<GlobalVariable>(v)) {
+            // TLS addresses belong to the executing thread, not a shared
+            // relocation table. In particular llvm.threadlocal.address must
+            // retain its GlobalValue operand for target-specific lowering.
+            return !global->isThreadLocal();
         } else if(isa<GlobalValue>(v)) {
             return true;
 
@@ -866,6 +932,16 @@ struct StabilizerImpl {
      * \arg m The module to transform
      */
     void declareRuntimeFunctions(Module& m) {
+        FunctionType* moduleType = FunctionType::get(Type::getVoidTy(m.getContext()),
+            {Type::getInt32Ty(m.getContext()), Type::getInt32Ty(m.getContext())}, false);
+        registerModule = m.getFunction("stabilizer_register_module");
+        if(registerModule && (registerModule->getFunctionType() != moduleType ||
+                              !registerModule->isDeclaration()))
+            report_fatal_error("incompatible stabilizer_register_module declaration");
+        if(!registerModule)
+            registerModule = Function::Create(moduleType, Function::ExternalLinkage,
+                "stabilizer_register_module", &m);
+        registerModule->addFnAttr(Attribute::NonLazyBind);
         // Declare the register_function runtime function
         // void stabilizer_register_function(
         //    void* codeBase, void* tableBase, size_t tableSize,

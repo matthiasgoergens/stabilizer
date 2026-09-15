@@ -13,6 +13,7 @@
 #include "CodeWindow.h"
 #include "Context.h"
 #include "TextRelocations.h"
+#include "Retained.h"
 
 extern "C" int stabilizer_main(int argc, char **argv);
 
@@ -54,14 +55,17 @@ void** topFrame = NULL;
  */
 int main(int argc, char **argv) {
     DEBUG("Initializing Stabilizer");
+    bool retained = retained_configure();
 
     topFrame = (void**)__builtin_frame_address(0);
     DEBUG("Stack top is at %p", topFrame);
 
     // Register signal handlers
-    setHandler(Trap::TrapSignal, onTrap);
-    setHandler(SIGALRM, onTimer);
-    setHandler(SIGSEGV, onFault);
+    if(!retained) {
+        setHandler(Trap::TrapSignal, onTrap);
+        setHandler(SIGALRM, onTimer);
+        setHandler(SIGSEGV, onFault);
+    }
     DEBUG("Signal handlers installed");
 
 #if !(defined(__linux__) && defined(__x86_64__))
@@ -127,6 +131,9 @@ int main(int argc, char **argv) {
         }
     }
 
+    if(!functions.empty()) configureCodeHeap();
+    if(retained) retained_validate_layout();
+
     // All metadata is now validated.  Only now is it safe to replace entries.
     if(!functions.empty()) {
         for(Function* f : functions) {
@@ -134,16 +141,20 @@ int main(int argc, char **argv) {
         }
     }
 
-    // Lazily relocate functions
-    for(std::set<Function*>::iterator iter = functions.begin(); iter != functions.end(); iter++) {
-        Function* f = *iter;
-        f->setTrap();
-    }
-    DEBUG("Trapped all functions");
+    if(retained) {
+        retained_start();
+    } else {
+        // Lazily relocate functions
+        for(std::set<Function*>::iterator iter = functions.begin(); iter != functions.end(); iter++) {
+            Function* f = *iter;
+            f->setTrap();
+        }
+        DEBUG("Trapped all functions");
 
-    // Set the re-randomization timer
-    setTimer(interval);
-    DEBUG("Set re-randomization timer");
+        // Set the re-randomization timer
+        setTimer(interval);
+        DEBUG("Set re-randomization timer");
+    }
 
     // Call all constructors
     for(std::vector<ctor_t>::iterator i = constructors.begin(); i != constructors.end(); i++) {
@@ -159,8 +170,12 @@ int main(int argc, char **argv) {
     // torn down (the "Placing traps" path writes traps into function memory
     // that may already be unmapped, faulting in onFault). Set the flag first
     // so an alarm already in flight is a no-op, then stop the timer.
-    shutting_down = 1;
-    setTimer(0);
+    if(retained) {
+        retained_stop();
+    } else {
+        shutting_down = 1;
+        setTimer(0);
+    }
 
     DEBUG("Shutting down");
 
@@ -169,31 +184,40 @@ int main(int argc, char **argv) {
 
 extern "C" {
     void stabilizer_register_function(void* codeBase, void* tableBase, uint32_t tableSize, uint8_t* stackPad) {
+        retained_guard_registration();
+        if(stackPad) retained_note_stack();
         Function* f = new Function(codeBase, tableBase, tableSize, stackPad);
         functions.insert(f);
     }
 
     void stabilizer_register_constructor(ctor_t ctor) {
+        retained_guard_registration();
         constructors.push_back(ctor);
     }
 
     void stabilizer_register_stack_pad(uint8_t* pad) {
+        retained_guard_registration();
+        retained_note_stack();
         stack_pads.insert(pad);
     }
 
     void* stabilizer_malloc(size_t sz) {
+        retained_guard_heap();
         return getDataHeap()->malloc(sz);
     }
 
     void* stabilizer_calloc(size_t n, size_t sz) {
+        retained_guard_heap();
         return getDataHeap()->calloc(n, sz);
     }
 
     void* stabilizer_realloc(void *p, size_t sz) {
+        retained_guard_heap();
         return getDataHeap()->realloc(p, sz);
     }
 
     void stabilizer_free(void *p) {
+        retained_guard_heap();
         if(getDataHeap()->getSize(p) == 0) {
             free(p);
         } else {
@@ -213,7 +237,7 @@ void onTrap(int sig, siginfo_t* info, void* p) {
     c.ip() = (void*)((uintptr_t)c.ip() - Trap::TrapAdjust);
 
     // Extract the trapped function (stored next to the trap instruction)
-    FunctionHeader* h = (FunctionHeader*)c.ip();
+    FunctionHeader* h = FunctionHeader::fromTrapAddress(c.ip());
     Function* f = h->getFunction();
 
     // If the trap was placed to trigger a re-randomization
@@ -275,12 +299,16 @@ void onTimer(int sig, siginfo_t* info, void* p) {
         DEBUG("Placing traps");
         for(std::set<Function*>::iterator iter = live_functions.begin(); iter != live_functions.end(); iter++) {
             Function* f = *iter;
+#if !defined(__x86_64__)
+            // Legacy entries rewrite instructions in place. The immutable
+            // x86_64 entry can resume its jump or trap without PC fixups.
             uintptr_t ip = (uintptr_t)c.ip();
             uintptr_t entry = (uintptr_t)f->getCodeBase();
             if(ip >= entry && ip < entry + PATCHABLE_ENTRY_SIZE) {
                 DEBUG("Forwarding from trap at %p", c.ip());
                 c.ip() = f->getCurrentLocation()->getBase();
             }
+#endif
             f->setTrap();
         }
 

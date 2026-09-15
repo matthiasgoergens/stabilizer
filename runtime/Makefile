@@ -1,5 +1,6 @@
 ROOT = ..
 CROSS_TARGET = 1
+LIBS = pthread
 TARGETS = $(ROOT)/libstabilizer.$(SHLIB_SUFFIX) $(ROOT)/libstabilizer.a
 INCLUDE_DIRS = $(ROOT)/Heap-Layers \
     $(ROOT)/DieHard/src/include \

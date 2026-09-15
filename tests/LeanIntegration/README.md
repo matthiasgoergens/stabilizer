@@ -1,0 +1,135 @@
+# Lean integration regression
+
+This Linux x86_64 correctness check regenerates `Variants.c` with released
+Lean 4.33.1 and links its matching native shared runtime. It exercises the
+loop-study workload from Matthias Goergens's faster-lean investigations;
+`Variants.lean` is an unchanged copy of that workload. The generated C is
+compiled both natively and with Stabilizer's code instrumentation.
+
+Run after building Stabilizer, with LLVM 21 on PATH:
+
+```sh
+uv run --no-project --with setuptools==84.0.0 tests/LeanIntegration/check.py --lean-root /path/to/lean-4.33.1-linux --output tests/LeanIntegration/build/results
+```
+
+The output directory must be new. `--llvm-bin` can select an explicit LLVM
+binary directory. The runner checks the Lean version and embedded commit,
+records commands, outputs and input hashes, and leaves generated C/binaries
+for inspection. CI verifies the release archive using `lean.sha256` before
+extraction. The digest is the GitHub release asset's SHA256 for
+[Lean 4.33.1 Linux](https://github.com/leanprover/lean4/releases/tag/v4.33.1).
+
+The driver preserves Lean's generated initialisation and finalisation. It
+wraps the real `lean_run_main` call, checks `pthread_self()` inside each
+callback, and calls the application twice. Instrumented cases require a
+completed relocation epoch and a changed callback destination between calls.
+The generated application's two clock calls per invocation go through a
+separately compiled native observer DSO. It records its caller return PCs,
+which must change between instrumented invocations and remain unchanged in
+native controls. This checks execution in different application code copies,
+not just publication of new entry targets. It does not show that a live inner
+loop moves while executing, or that layout samples are independent.
+Both `LEAN_MAIN_USE_THREAD=0` and `1` are exercised; `LEAN_NUM_THREADS=1`
+alone does not suppress the main worker thread.
+
+Ten variants × native/instrumented × initial/worker thread give 40 fresh
+processes. Two further processes check automatic epochs. All runs check two
+checksum pairs against an independent integer reference implementation.
+A one-generation negative control must reject an epoch request rather than
+mistaking retained startup for continuing sampling. A second negative control
+substitutes an observer that always reports the same PC: it must fail even
+after the epoch and destination checks succeed. Thus there are 42 positive
+processes and two negative controls. Each process has an
+external timeout; epoch waiting also has an internal monotonic deadline.
+
+`--workload adler` selects the unchanged `AdlerTiming.lean` workload from
+Matthias Goergens's faster-lean Adler direct-fold investigation. This uses
+the same released Lean compiler/runtime, without private compiler options;
+it is distinct from experiments using faster-lean's development compiler.
+Both native and instrumented C builds use `-O3` for Adler; the original loop
+fixture continues to use `-O2`.
+
+Adler checks boxed-array fold, direct byte-array fold and indexed recurrence
+against an independent high-byte LCG input generator and zlib Adler checksum.
+Sizes 0, 1 and 1024 with 0, 1 and 3 repetitions, plus 256 KiB with eight
+repetitions and 1 MiB with two, give eleven cases per kernel. The final state
+chains repetitions; warm-up starts separately from `(1, 0)`. Each case runs
+natively and instrumented on both callback thread modes. Including automatic
+epochs gives 134 positive processes and the same two negative controls.
+CI runs both workloads as mandatory steps and preserves their observations
+separately. Adler's clock-call exposure has the same scope limits as the
+loop fixture: it does not prove that the hot kernel moves mid-loop.
+The lightweight `test_check.py` runner tests also run in CI: zero elapsed
+time is valid (clock resolution is not under test), while malformed output,
+wrong checksums and missing code movement are rejected.
+
+This is a separate CI step, not part of dependency-light `make test`, because
+the pinned Lean release archive is approximately 570 MB. CI does not skip it.
+The ordinary C pthread regressions remain in `make test`. Observer calls
+perturb the workload, so do not compare these timings with unwrapped probes.
+Printed timings
+are ignored: this does not establish overhead, useful measurement accuracy,
+unbounded sampling, general TLS/unwind support or instrumented Lean-runtime
+compatibility. Compiler and runtime versions must not be mixed when updating
+the pin; update the digest and embedded-commit check together.
+
+## Repeated kernel-entry exposure
+
+`repeated.py` supplements the two-invocation tests with eight invocations in
+each fresh process, grouped into two blocks. Each block contains two calls
+to the same boxed helper, one direct fold and one indexed reference. Native
+and retained-fixed modes keep one layout; retained-sampled mode requests one
+epoch between the blocks. Automatic epochs are disabled. Both callback
+thread modes and four size/repetition pairs are exercised: (0, 0),
+(1024, 3), (262144, 8) and (1048576, 2). This gives 24 positive processes
+and 192 positive invocations, with checksums checked using the shared Adler
+oracle. Printed times are not analysed.
+
+```sh
+uv run --no-project --with setuptools==84.0.0 python -B tests/LeanIntegration/repeated.py --lean-root /path/to/lean-4.33.1-linux --output tests/LeanIntegration/build/repeated
+```
+
+The runner accepts the same optional `--llvm-bin` directory. It retains the
+original generated C and injects one native observer call at each generated
+helper/direct/reference definition, failing if a definition is missing or
+ambiguous. Corresponding clock and kernel probe PCs must change across
+sampled blocks and remain fixed in controls. Clang may inline probe sites;
+this establishes execution at the injected sites, not separate out-of-line
+functions or movement of an active inner loop. Probes can affect optimisation
+and timings, so this is not an overhead measurement.
+
+Three negative controls check malformed block order, startup exhaustion at
+one epoch, and a constant-kernel-PC observer. The last must pass checksums,
+clock movement and epoch progression while failing kernel movement. A generic
+failure is not accepted in its place. `test_repeated.py` supplies self-contained
+positive and mutation tests of these output gates, without saved local logs.
+CI runs both the unit tests and repeated-process matrix as a mandatory step
+and preserves its observations separately. Selected source/toolchain hashes
+are checked before and after building/running; built artefacts are checked
+across execution. This is not a complete manifest of system/imported files.
+
+The repeated observer also brackets each original wall-clock call with
+`CLOCK_THREAD_CPUTIME_ID` reads. Each invocation's JSON record contains
+`thread_cpu_before` and `thread_cpu_after`, each a two-element array of
+nanoseconds (start and stop). These are absolute readings for that callback
+thread, not process-wide CPU time. Reset/read occur only outside the joined
+callback; concurrent or nested callbacks are not supported by this observer.
+
+Subject to clock resolution and accounting error, CPU consumed between the
+wall-clock samples lies between `before[1] - after[0]` and
+`after[1] - before[0]`. Clock-call ordering and unsigned 64-bit representation
+are checked; equal samples are permitted. CPU-clock failures or invalid
+timestamps terminate the probe, rather than emitting a successful sample.
+No CPU-versus-wall threshold is a correctness gate. In particular, a tiny
+interval can appear inconsistent because of the two clocks' resolution.
+
+Subtracting those bounds from wall elapsed time can inform a future
+thread off-CPU investigation, but does not identify scheduler, blocking,
+GC or layout causes. Preserve raw differences, including negative values;
+do not silently clamp or discard them. Other threads' CPU is not measured.
+The four added CPU-clock reads per invocation perturb the observation; this
+is not an unbiased cost estimate and is not interchangeable with timings
+from older observers. CI checks the observation mechanism and behavioural
+parity, not performance or precision. `test_observer.py` additionally uses
+deterministic clock stubs to test ordering, reset and error handling without
+timing thresholds.
