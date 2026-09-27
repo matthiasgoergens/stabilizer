@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
     require(argc == 1 || early_shutdown || (argc == 2 && strcmp(argv[1], "exit") == 0), "unexpected argument");
     require(atexit(exit_check) == 0, "register atexit");
     if (early_shutdown) {
-        native_enable_shutdown_check();
+        native_enable_shutdown_check(checksum);
         double limit = monotonic_seconds() + 10;
         while (stabilizer_completed_epochs() < 2) {
             require(monotonic_seconds() < limit, "automatic epoch deadline");

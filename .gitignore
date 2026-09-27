@@ -33,6 +33,8 @@ tests/RelocationTypes/obj
 tests/RelocationTypes/relocation-types
 tests/RelocationTypes/types.out.ll
 
+tests/RetainedCode/native-helper.dynamic
+
 tests/libquantum/obj
 tests/libquantum/libquantum
 

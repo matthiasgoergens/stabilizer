@@ -9,6 +9,7 @@
 extern uint64_t stabilizer_completed_epochs(void);
 extern int stabilizer_retained_exhausted(void);
 extern int stabilizer_request_epoch(void);
+extern void *stabilizer_code_location(void *original_entry);
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t condition;
@@ -17,6 +18,7 @@ static int blocked, released;
 static void *saved_return, *saved_body;
 static uint64_t blocked_epoch;
 static int shutdown_check_enabled;
+static uint64_t (*shutdown_callback)(uint64_t);
 
 static void require(int condition, const char *message) {
     if (!condition) {
@@ -32,11 +34,20 @@ static void shutdown_check(void) {
     require(epochs >= 2, "automatic owner did not publish a second epoch");
     require(!stabilizer_retained_exhausted(), "budget exhausted before shutdown");
     require(stabilizer_request_epoch() == 0, "stopped owner accepted an epoch request");
+    void *body = stabilizer_code_location((void *)shutdown_callback);
+    require(body != NULL, "post-cleanup callback has no published body");
+    require(shutdown_callback(0) == UINT64_C(1442695040888963407),
+            "post-cleanup callback checksum");
     /* Supplementary observation only; rejection above is the shutdown contract. */
     struct timespec remaining = {0, 60000000};
     while (nanosleep(&remaining, &remaining) != 0)
         require(errno == EINTR, "stability observation nanosleep failed");
     require(stabilizer_completed_epochs() == epochs, "stopped epoch count changed");
+    require(stabilizer_code_location((void *)shutdown_callback) == body,
+            "post-cleanup callback body changed");
+    require(shutdown_callback(41) ==
+            ((UINT64_C(41) * UINT64_C(6364136223846793005)) ^
+             UINT64_C(1442695040888963407)), "post-cleanup callback second checksum");
     puts("retained-code: native post-cleanup shutdown check passed");
 }
 
@@ -45,7 +56,11 @@ __attribute__((constructor)) static void register_shutdown_check(void) {
     require(atexit(shutdown_check) == 0, "register late shutdown checker");
 }
 
-void native_enable_shutdown_check(void) { shutdown_check_enabled = 1; }
+void native_enable_shutdown_check(uint64_t (*callback)(uint64_t)) {
+    require(callback != NULL, "missing shutdown callback");
+    shutdown_callback = callback;
+    shutdown_check_enabled = 1;
+}
 
 static void check(int error) {
     if (error) {
