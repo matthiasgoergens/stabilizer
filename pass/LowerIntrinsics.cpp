@@ -2,6 +2,8 @@
 
 #include "llvm/Pass.h"
 
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 
 #include "IntrinsicLibcalls.h"
@@ -34,6 +36,14 @@ bool lowerInstrinsicsPass(Module &m)
                 r,
                 &m
             );
+        }
+        // Assignment tracking (-g at -O1+) attaches !DIAssignID to memory
+        // intrinsics; it is invalid on ordinary calls, so drop the markers.
+        for(User* u : f.users()) {
+            if(auto* call = dyn_cast<CallInst>(u)) {
+                at::deleteAssignmentMarkers(call);
+                call->setMetadata(LLVMContext::MD_DIAssignID, nullptr);
+            }
         }
         f.replaceAllUsesWith(f_extern);
         toDelete.insert(&f);
