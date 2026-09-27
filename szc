@@ -169,7 +169,20 @@ if not args.o:
 passes = []
 opts = []
 
-args.l.append('stdc++')
+def _have_libstdcxx():
+	# The C++ runtime is needed for C++ inputs; libstabilizer.so already
+	# depends on it.  Some toolchains (e.g. clang selecting a GCC installation
+	# without libstdc++-dev) cannot resolve -lstdc++ at all, which must not
+	# break linking plain C programs.
+	try:
+		out = subprocess.run([args.frontend, '-print-file-name=libstdc++.so'],
+			capture_output=True, text=True).stdout.strip()
+	except OSError:
+		return False
+	return os.path.isabs(out)
+
+if not args.c and (args.lang == 'c++' or _have_libstdcxx()):
+	args.l.append('stdc++')
 # args.v = True
 
 if 'code' in args.R:
