@@ -500,6 +500,7 @@ struct StabilizerImpl {
 
         // Must precede findPCRelativeUsesIn: it adds a global reference.
         rebaseIndirectBranches(m, f);
+        expandMultiGlobalConstants(f);
 
         // Collect all the referenced global values in this function
         std::map<Constant*, std::set<Use*> > references = findPCRelativeUsesIn(f);
@@ -645,6 +646,62 @@ struct StabilizerImpl {
             Value* delta = BinaryOperator::CreateSub(cur, orig, "label_delta", br);
             Value* target = GetElementPtrInst::Create(i8, br->getAddress(), {delta}, "rebased_label", br);
             br->setAddress(target);
+        }
+    }
+
+    /**
+     * \brief Collect the globals a constant expression refers to, and whether
+     * it does arithmetic on them.
+     */
+    void collectGlobals(Constant* c, std::set<Constant*>& out, bool& arithmetic) {
+        if(isa<GlobalValue>(c)) {
+            if(containsGlobal(c)) out.insert(c);
+        } else if(auto* e = dyn_cast<ConstantExpr>(c)) {
+            if(Instruction::isBinaryOp(e->getOpcode())) arithmetic = true;
+            for(Use& use : e->operands()) {
+                collectGlobals(cast<Constant>(use.get()), out, arithmetic);
+            }
+        }
+    }
+
+    /**
+     * \brief Turn arithmetic constant expressions on globals into instructions.
+     *
+     * A relocation-table slot is emitted as data initialised with the whole
+     * constant, and expressions such as the difference of two (possibly
+     * undefined, or differently sectioned) symbols or a negated address are
+     * not representable as data relocations.  Expanding them leaves each
+     * global (plus casts/GEPs) in a slot of its own.
+     */
+    void expandMultiGlobalConstants(Function& f) {
+        std::vector<Use*> work;
+        for(BasicBlock& b : f) {
+            for(Instruction& i : b) {
+                for(Use& use : i.operands()) {
+                    if(isa<ConstantExpr>(use.get())) work.push_back(&use);
+                }
+            }
+        }
+        while(!work.empty()) {
+            Use* use = work.back();
+            work.pop_back();
+            auto* e = cast<ConstantExpr>(use->get());
+            std::set<Constant*> globals;
+            bool arithmetic = false;
+            collectGlobals(e, globals, arithmetic);
+            if(globals.empty() || (globals.size() == 1 && !arithmetic)) continue;
+
+            Instruction* user = cast<Instruction>(use->getUser());
+            Instruction* insertion_point = user;
+            if(auto* phi = dyn_cast<PHINode>(user)) {
+                insertion_point = phi->getIncomingBlock(*use)->getTerminator();
+            }
+            Instruction* expanded = e->getAsInstruction();
+            expanded->insertBefore(insertion_point->getIterator());
+            use->set(expanded);
+            for(Use& operand : expanded->operands()) {
+                if(isa<ConstantExpr>(operand.get())) work.push_back(&operand);
+            }
         }
     }
 
