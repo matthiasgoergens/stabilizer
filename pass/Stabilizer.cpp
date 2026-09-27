@@ -245,6 +245,9 @@ struct StabilizerImpl {
         Function *main = m.getFunction("main");
         if(main != NULL) {
             main->setName("stabilizer_main");
+            // Called from libstabilizer's main(); -fvisibility=hidden would
+            // otherwise make it unresolvable from the shared runtime.
+            main->setVisibility(GlobalValue::DefaultVisibility);
         }
     }
 
