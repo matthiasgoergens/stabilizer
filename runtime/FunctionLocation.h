@@ -12,7 +12,8 @@ private:
     friend class Function;
     
     Function* _f;
-    MemRange _memory;
+    void* _raw;       // Allocation returned by the code heap (freed on release)
+    MemRange _memory; // The executing copy: _raw plus a random start offset
     bool _defunct;
     bool _marked;
     
@@ -33,8 +34,10 @@ private:
     }
     
 public:
-    FunctionLocation(Function* f) :  _f(f), _memory(getCodeHeap()->malloc(_f->getAllocationSize()), _f->getAllocationSize()) {
-        if(_memory.base() == NULL) {
+    FunctionLocation(Function* f) :  _f(f),
+        _raw(getCodeHeap()->malloc(_f->getAllocationSize() + codePlacementPad())),
+        _memory(randomizeStart(_raw, _f->getAllocationSize()), _f->getAllocationSize()) {
+        if(_raw == NULL) {
             perror("code malloc");
             uintptr_t lo = 0;
             uintptr_t hi = 0;
@@ -53,7 +56,7 @@ public:
     }
     
     ~FunctionLocation() {
-        getCodeHeap()->free(_memory.base());
+        getCodeHeap()->free(_raw);
     }
     
     /**

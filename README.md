@@ -141,6 +141,14 @@ class, then shares remaining space up to 256 slots per class. Insufficient
 budgets and unsupported sizes are rejected before function headers are
 installed; there is no unshuffled large-code fallback. Slots are filled lazily.
 
+Each copy is also started at a random multiple of 16 bytes (up to one page)
+within the slack of its size class; 64 bytes of padding are requested per copy
+so that the start offset modulo 64 is always uniform. Without this every copy
+starts at the same offset modulo 32, and large functions (for example an
+interpreter loop) at nearly the same offset modulo the page size, so their
+cache-line and page alignment would hardly be sampled.
+`STABILIZER_CODE_OFFSET=0` restores the unshifted placement.
+
 This is separate from the retained logical copied-body budget. It excludes
 allocation headers, chunk slack, mappings, metadata and live code copies, so
 it is **not an RSS limit**. Reservoirs have process lifetime. Their successive

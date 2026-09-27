@@ -62,4 +62,11 @@ DataHeapType* getDataHeap();
 CodeHeapType* getCodeHeap();
 void configureCodeHeap();
 
+// Bytes added to every code request so that the start of each copy can be
+// moved by a random multiple of CODE_OFFSET_GRANULE (0 when disabled).
+size_t codePlacementPad();
+
+// Pick the start of a copy of `size` bytes inside the allocation `raw`.
+void* randomizeStart(void* raw, size_t size);
+
 #endif
