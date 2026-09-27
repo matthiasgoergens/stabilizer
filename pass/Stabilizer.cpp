@@ -498,6 +498,9 @@ struct StabilizerImpl {
             extractFloatOperations(f);
         //}
 
+        // Must precede findPCRelativeUsesIn: it adds a global reference.
+        rebaseIndirectBranches(m, f);
+
         // Collect all the referenced global values in this function
         std::map<Constant*, std::set<Use*> > references = findPCRelativeUsesIn(f);
 
@@ -597,6 +600,51 @@ struct StabilizerImpl {
             args.push_back(Constant::getIntegerValue(Type::getInt32Ty(m.getContext()), APInt(32, 0, false)));
 
             return args;
+        }
+    }
+
+    /**
+     * \brief Make computed gotos stay inside the executing copy of a function.
+     *
+     * Label-address tables (e.g. CPython's opcode_targets) are data holding
+     * absolute block addresses of the original, link-time copy.  Without this,
+     * a relocated copy leaves itself at its first indirect goto and continues
+     * in the original (never randomised) code.  Rebase each indirectbr target
+     * by the distance between the executing copy and the original: a label
+     * address materialised in code is PC-relative (and internal to the copied
+     * body), while the same label loaded from data is the original address.
+     */
+    void rebaseIndirectBranches(Module& m, Function& f) {
+        std::vector<IndirectBrInst*> branches;
+        BasicBlock* anchor = nullptr;
+        for(BasicBlock& b : f) {
+            if(auto* br = dyn_cast<IndirectBrInst>(b.getTerminator())) {
+                branches.push_back(br);
+                // Reuse an existing address-taken block as the anchor.
+                if(!anchor && br->getNumDestinations() > 0) {
+                    anchor = br->getDestination(0);
+                }
+            }
+        }
+        if(!anchor) {
+            return;
+        }
+
+        Constant* here = BlockAddress::get(&f, anchor);
+        // Mutable, so the load of the original address is never folded back
+        // into a (PC-relative) constant.
+        GlobalVariable* original = new GlobalVariable(m, here->getType(), false,
+            GlobalValue::InternalLinkage, here, f.getName() + ".label_anchor");
+
+        Type* intptr = getIntptrType(m);
+        Type* i8 = Type::getInt8Ty(m.getContext());
+        for(IndirectBrInst* br : branches) {
+            Value* loaded = new LoadInst(here->getType(), original, "label_anchor.original", br);
+            Value* orig = new PtrToIntInst(loaded, intptr, "", br);
+            Value* cur = new PtrToIntInst(here, intptr, "label_anchor.current", br);
+            Value* delta = BinaryOperator::CreateSub(cur, orig, "label_delta", br);
+            Value* target = GetElementPtrInst::Create(i8, br->getAddress(), {delta}, "rebased_label", br);
+            br->setAddress(target);
         }
     }
 
