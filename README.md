@@ -201,10 +201,15 @@ The counter advances after a full publication pass; individual function
 destinations are updated sequentially, not as an atomic whole-program switch.
 Location queries expose observations, not ownership or a reclamation API.
 
+With `STABILIZER_MAX_EPOCHS=1` no maintenance thread is started: each
+process runs on one random layout, drawn at startup, and may `fork()` (the
+child keeps that layout). `STABILIZER_QUIET=1` suppresses the startup notice,
+for programs whose tests compare stderr.
+
 Initial header installation requires quiescence: native DSO constructors must
 not start concurrent calls into instrumented executable text before runtime
 initialisation. Instrumented registration after startup is rejected, as is
-ordinary `fork()` in retained mode. Local-exec TLS offsets (`R_X86_64_TPOFF32`)
+ordinary `fork()` while the retained maintenance thread exists. Local-exec TLS offsets (`R_X86_64_TPOFF32`)
 are preserved across code relocation and tested with distinct thread values
 and stable per-thread addresses. The LLVM TLS-address intrinsic is outlined
 into small fixed, non-inlined helpers; these are not randomised. Canonical

@@ -40,7 +40,11 @@ reject heap 'Stabilizer retained mode requires code-only instrumentation and cur
 reject stack 'Stabilizer retained mode requires code-only instrumentation and current module metadata' ./admission-stack
 reject legacy 'Stabilizer retained mode: heap instrumentation is not supported' ./admission-legacy
 reject late 'Stabilizer retained mode: registration after startup is not supported' ./admission-late
-reject fork 'Stabilizer retained mode: fork is not supported' ./admission-fork
+# Fork is rejected while the maintenance thread exists; a single-generation
+# run has no such thread and may fork.
+reject fork 'Stabilizer retained mode: fork is not supported' STABILIZER_MAX_EPOCHS=2 ./admission-fork
+timeout --kill-after=1s 10s ./admission-fork >fork-single.out 2>&1
+grep -F -x 'retained admission control passed' fork-single.out
 reject wrong-mode 'Stabilizer: STABILIZER_CODE_MODE must be legacy or retained' STABILIZER_CODE_MODE=wrong ./admission-plain
 reject zero-epochs 'Stabilizer retained mode: numeric option out of range' STABILIZER_MAX_EPOCHS=0 ./admission-plain
 reject overflow 'Stabilizer retained mode: invalid numeric option' STABILIZER_MAX_CODE_BYTES=184467440737095516160 ./admission-plain

@@ -162,7 +162,11 @@ bool retained_configure() {
     period_ms = option("STABILIZER_INTERVAL_MS", 500, 0, 3600000);
     enabled = true;
     registration_closed = true;
-    message("Stabilizer experimental retained mode: bounded sampling; inspect epoch/exhaustion counters\n");
+    // STABILIZER_QUIET=1 keeps stderr clean for programs whose own tests
+    // compare it (e.g. CPython's test suite).
+    const char* quiet = std::getenv("STABILIZER_QUIET");
+    if(!quiet || std::strcmp(quiet, "1") != 0)
+        message("Stabilizer experimental retained mode: bounded sampling; inspect epoch/exhaustion counters\n");
     return true;
 }
 
@@ -189,9 +193,14 @@ void retained_start() {
        pthread_cond_init(&changed, &attr))
         fail("Stabilizer retained mode: condition initialisation failed\n");
     pthread_condattr_destroy(&attr);
-    if(std::atexit(retained_stop) || pthread_atfork(reject_fork, nullptr, nullptr))
+    if(std::atexit(retained_stop))
         fail("Stabilizer retained mode: lifecycle registration failed\n");
     if(!exhausted.load()) {
+        // Only the maintenance thread makes fork unsafe. A single-generation
+        // run (STABILIZER_MAX_EPOCHS=1) has none, so it may fork: the child
+        // inherits the published layout, which is never changed again.
+        if(pthread_atfork(reject_fork, nullptr, nullptr))
+            fail("Stabilizer retained mode: lifecycle registration failed\n");
         if(pthread_create(&owner, nullptr, maintain, nullptr))
             fail("Stabilizer retained mode: owner creation failed\n");
         started = true;
