@@ -7,7 +7,7 @@ import sys
 import random
 import argparse
 import shutil
-from distutils import util
+import tempfile
 
 
 parser = argparse.ArgumentParser(description='Stabilizer Compiler Driver')
@@ -35,10 +35,48 @@ parser.add_argument('-D', action='append', default=[])
 parser.add_argument('-L', action='append', default=[])
 parser.add_argument('-I', action='append', default=[])
 parser.add_argument('-l', action='append', default=[])
-parser.add_argument('input', nargs='+')
+parser.add_argument('input', nargs='*')
 
-# Do the parse
-args = parser.parse_args()
+# Options (mostly GCC/Clang style, as used by autoconf/make based builds) that
+# szc does not interpret are passed through.  Options taking a separate value
+# are paired up first, so the value is not mistaken for an input file.
+LINK_ONLY_PAIRS = {'-Xlinker'}
+COMPILE_ONLY_PAIRS = {'-MF', '-MT', '-MQ', '-include', '-isystem', '-idirafter',
+                      '-iquote', '-Xclang', '-x'}
+LINK_ONLY_PREFIXES = ('-Wl,', '-fuse-ld=', '-rtlib=', '--rtlib=')
+LINK_ONLY_FLAGS = {'-shared', '-rdynamic', '-static', '-pie', '-no-pie'}
+BOTH_FLAGS = {'-pthread'}
+
+argv = sys.argv[1:]
+compile_extra = []
+link_extra = []
+rest = []
+i = 0
+while i < len(argv):
+	a = argv[i]
+	if (a in LINK_ONLY_PAIRS or a in COMPILE_ONLY_PAIRS) and i + 1 < len(argv):
+		(link_extra if a in LINK_ONLY_PAIRS else compile_extra).extend(argv[i:i+2])
+		i += 2
+		continue
+	rest.append(a)
+	i += 1
+
+args, unknown = parser.parse_known_args(rest)
+for a in unknown:
+	if not a.startswith('-') or a == '-':
+		args.input.append(a)
+	elif a in LINK_ONLY_FLAGS or a.startswith(LINK_ONLY_PREFIXES):
+		link_extra.append(a)
+	elif a in BOTH_FLAGS or a.startswith('-m'):
+		compile_extra.append(a)
+		link_extra.append(a)
+	else:
+		compile_extra.append(a)
+
+SHARED = '-shared' in link_extra
+ASM_SUFFIXES = ('.s', '.S', '.sx', '.asm')
+SOURCE_SUFFIXES = ASM_SUFFIXES + ('.c', '.i', '.cc', '.cp', '.cpp', '.cxx', '.c++', '.C', '.ii',
+                                  '.f', '.F', '.for', '.f77', '.f90', '.F90', '.f95', '.F95', '.f03', '.f08')
 
 if args.frontend == 'gcc':
 	print('GCC/DragonEgg frontend is no longer supported. Use -frontend=clang (C/C++) or -lang=fortran (Flang).')
@@ -65,9 +103,9 @@ def require_flang():
 
 
 def getPlatform():
-	if util.get_platform().startswith('macosx'):
+	if sys.platform == 'darwin':
 		return 'osx'
-	elif util.get_platform().startswith('linux'):
+	elif sys.platform.startswith('linux'):
 		return 'linux'
 	else:
 		print('Unsupported platform')
@@ -105,6 +143,21 @@ LLVM_AS = 'llvm-as'
 
 FLANG = shutil.which('flang') or shutil.which('flang-new')
 
+def szc_only(a):
+	return a.startswith(('-R', '-lang', '-platform', '-frontend')) or a == '-v'
+
+# Preprocess-only, assembly-only, dependency-only and query invocations (for
+# example `-E`, `--version`, `-print-multiarch`), as well as assembling native
+# assembly sources, do not produce anything to instrument: run the frontend
+# unchanged.
+PASSTHROUGH_FLAGS = {'-E', '-S', '-M', '-MM', '-fsyntax-only'}
+if (not args.input or PASSTHROUGH_FLAGS & set(compile_extra) or
+	(args.c and all(x.endswith(ASM_SUFFIXES) for x in args.input))):
+	cmd = [args.frontend] + [a for a in sys.argv[1:] if not szc_only(a)]
+	if args.v:
+		print(shlex.join(cmd))
+	exit(subprocess.call(cmd))
+
 if not args.o:
 	# Match common compiler defaults, and avoid confusing TypeErrors later.
 	if args.c and len(args.input) == 1 and not args.input[0].endswith('.o'):
@@ -131,14 +184,96 @@ if 'stack' in args.R:
 if 'heap' in args.R:
 	opts.append('stabilize-heap')
 
+# Shared objects are not instrumented: the runtime does not support
+# registering instrumented modules after startup.  They are optimised and
+# linked as ordinary (whole-module) native code.
+if SHARED:
+	args.R = [r for r in args.R if r == 'link']
+	passes = []
+	opts = []
+
 if 'code' in args.R or 'heap' in args.R or 'stack' in args.R:
 	args.L.append(STABILIZER_HOME)
 	args.l.append('stabilizer')
 	passes.append('stabilize')
+	if args.platform == 'linux':
+		link_extra.append('-Wl,-rpath,' + STABILIZER_HOME)
+
+TMPDIR = None
+def tmpdir():
+	global TMPDIR
+	if TMPDIR is None:
+		TMPDIR = tempfile.mkdtemp(prefix='szc.', dir=os.path.dirname(os.path.abspath(args.o)))
+	return TMPDIR
+
+BITCODE_MAGIC = b'BC\xc0\xde'
+ARCHIVE_MAGIC = b'!<arch>\n'
+
+def file_magic(path):
+	try:
+		with open(path, 'rb') as f:
+			return f.read(8)
+	except OSError:
+		return b''
+
+def archive_members(path):
+	"""Yield (name, data) for the members of a System V/GNU `ar` archive."""
+	with open(path, 'rb') as f:
+		data = f.read()
+	pos = len(ARCHIVE_MAGIC)
+	longnames = b''
+	while pos + 60 <= len(data):
+		header = data[pos:pos+60]
+		name = header[0:16].decode().rstrip()
+		size = int(header[48:58].decode().strip())
+		body = data[pos+60:pos+60+size]
+		pos += 60 + size + (size & 1)
+		if name == '//':
+			longnames = body
+		elif name in ('/', '/SYM64/', '__.SYMDEF', '__.SYMDEF SORTED'):
+			continue
+		else:
+			if name.startswith('/') and name[1:].isdigit():
+				off = int(name[1:])
+				name = longnames[off:longnames.index(b'\n', off)].decode()
+			yield name.rstrip('/'), body
+
+def split_inputs(inputs):
+	"""Separate LLVM bitcode (to be linked and instrumented) from native
+	objects/libraries (passed to the final native link).  Archives are
+	expanded: every member is linked, as with --whole-archive."""
+	bitcode = []
+	native = []
+	for path in inputs:
+		magic = file_magic(path)
+		if magic.startswith(BITCODE_MAGIC):
+			bitcode.append(path)
+		elif magic.startswith(ARCHIVE_MAGIC):
+			for n, (name, body) in enumerate(archive_members(path)):
+				out = os.path.join(tmpdir(), '%d.%s' % (n, os.path.basename(name)))
+				with open(out, 'wb') as f:
+					f.write(body)
+				(bitcode if body.startswith(BITCODE_MAGIC) else native).append(out)
+		else:
+			native.append(path)
+	return bitcode, native
 
 def compile(input):
-	if input.endswith('.o'):
+	if not input.endswith(SOURCE_SUFFIXES):
+		# Objects, archives and libraries.
 		return input
+
+	if not args.c:
+		# Compiling and linking in one step: keep per-source bitcode separate
+		# from the final output.
+		output = os.path.join(tmpdir(), os.path.splitext(os.path.basename(input))[0] +
+			('.o' if input.endswith(ASM_SUFFIXES) else '.bc'))
+	else:
+		output = args.o
+
+	if input.endswith(ASM_SUFFIXES):
+		run([args.frontend, '-c', '-o', output] + arg('I', args.I) + arg('D', args.D) + compile_extra + [input])
+		return output
 
 	if args.lang == 'fortran':
 		flang = require_flang()
@@ -146,19 +281,19 @@ def compile(input):
 
 		# Emit LLVM bitcode via flang. Try O0 first; fall back if needed.
 		for opt in ['0', '1']:
-			cmd = [flang, '-O' + opt, '-c', '-emit-llvm', '-o', args.o]
+			cmd = [flang, '-O' + opt, '-c', '-emit-llvm', '-o', output]
 			cmd += common
 			cmd.append(input)
 			if try_run(cmd):
-				return args.o
+				return output
 
 		# Last resort: emit LLVM IR assembly and assemble it.
-		ll = args.o + '.ll'
+		ll = output + '.ll'
 		cmd = [flang, '-O1', '-S', '-emit-llvm', '-o', ll]
 		cmd += common
 		cmd.append(input)
 		run(cmd)
-		run([LLVM_AS, '-o', args.o, ll])
+		run([LLVM_AS, '-o', output, ll])
 
 	else:
 		# Optimise each translation unit at the requested level; transform()
@@ -172,15 +307,16 @@ def compile(input):
 		else:
 			# Keep -O0 semantics, but let required lowering/instrumentation run.
 			frontend_flags = ['-O0', '-Xclang', '-disable-O0-optnone']
-		cmd = [args.frontend] + frontend_flags + ['-c', '-emit-llvm', '-o', args.o]
+		cmd = [args.frontend] + frontend_flags + ['-c', '-emit-llvm', '-o', output]
 		cmd += arg('g', args.g)
 		cmd += arg('I', args.I)
 		cmd += arg('f', args.f)
 		cmd += arg('D', args.D)
+		cmd += compile_extra
 		cmd.append(input)
 		run(cmd)
 
-	return args.o
+	return output
 
 def link(inputs):
 	cmd = [LLVM_LINK, '-o', args.o + '.bc']
@@ -203,6 +339,8 @@ def transform(input):
 		pipeline.append('default<O' + str(args.O) + '>')
 
 	pipeline.extend(passes)
+	if not pipeline:
+		return input
 	cmd.append('-passes=' + ','.join(pipeline))
 
 	for v in opts:
@@ -211,7 +349,7 @@ def transform(input):
 	run(cmd)
 	return args.o + '.opt.bc'
 
-def codegen(input):
+def codegen(input, native):
 	# Honour the requested optimisation level throughout the pipeline while
 	# retaining the code-relocation and legacy stack-walk requirements.
 	cmd = [LLC, '-O' + str(args.O), '-relocation-model=pic', '--frame-pointer=all']
@@ -230,6 +368,7 @@ def codegen(input):
 		cmd = [args.frontend]
 
 	cmd.append(llc_obj)
+	cmd += native
 
 	# Keep relocation records so the runtime can patch pc-relative references
 	# after moving code.
@@ -240,6 +379,7 @@ def codegen(input):
 	cmd += arg('f', args.f)
 	cmd += arg('L', args.L)
 	cmd += arg('l', args.l)
+	cmd += link_extra
 
 	run(cmd)
 
@@ -255,7 +395,17 @@ def codegen(input):
 # Build up program arguments
 object_files = list(map(compile, args.input))
 
-if not args.c:
-	linked = link(object_files)
-	transformed = transform(linked)
-	codegen(transformed)
+try:
+	if not args.c:
+		bitcode, native = split_inputs(object_files)
+		if bitcode:
+			linked = link(bitcode)
+			transformed = transform(linked)
+			codegen(transformed, native)
+		else:
+			# Nothing to instrument (e.g. only native objects).
+			run([args.frontend, '-o', args.o] + native + arg('f', args.f) +
+				arg('L', args.L) + arg('l', args.l) + link_extra)
+finally:
+	if TMPDIR is not None and not args.v:
+		shutil.rmtree(TMPDIR, ignore_errors=True)
